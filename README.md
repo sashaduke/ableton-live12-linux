@@ -12,6 +12,27 @@ The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and a
 
 This repo does not provide Ableton Live, activation, serials, cracks, or downloads. You need your own licensed Ableton Live 12 installer/account.
 
+## Known-Good Setup
+
+Tagged known-good state: `known-good-2026-06-30`.
+
+This is the setup that was working cleanly on June 30, 2026:
+
+- Ableton Live 12.4.2 Suite
+- Serum 2.1.4 VST3
+- niri 26.04 on Wayland
+- rootful Xwayland, floating and output-sized
+- `2560x1440` output at scale `1`, tested at `165 Hz`
+- patched Wine 11.11 from `d2d1-dcomp-11.11`
+- WineD3D OpenGL renderer, not DXVK
+- Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
+- `WINE_D3D_CONFIG=csmt=0x0`
+- Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
+- Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
+- Serum 2 prefs keep DirectComposition and partial redraw enabled
+
+The important negative result is `-_ForceOpenGlBackend`: it made one Ableton repaint issue look better, but caused Serum 2 editor redraw corruption to spread into Ableton's host UI. The launcher now removes that flag before startup.
+
 ## Quick Start
 
 Arch/niri users with a local Ableton installer:
@@ -161,6 +182,18 @@ If Ableton's own UI leaves tracers or does not repaint until the next click/key 
 
 Do not keep `-_ForceOpenGlBackend` in Ableton's `Options.txt`. It can reduce one class of Live repaint issue, but in testing it made Serum 2 editor redraw corruption spread into Ableton's host UI. The launcher removes that flag before startup.
 
+For Serum 2.1.4, keep the default `d2d-opengl` Serum prefs:
+
+```json
+{
+    "Disable DirectComposition": false,
+    "Disable Partial Redraw": false,
+    "Default Overview Type Is 3D": false
+}
+```
+
+Changing Serum to full redraw (`"Disable Partial Redraw": true`) froze or badly stalled the editor in testing. Disabling Serum DirectComposition while keeping partial redraw enabled still produced host redraw corruption.
+
 If Live's GPU renderer regresses on your machine:
 
 ```bash
@@ -201,26 +234,29 @@ That may improve performance, but can bring back async repaint artifacts on Able
 
 ## Verified Result
 
-Verified on June 29, 2026:
+Verified on June 30, 2026:
 
 - Ableton Live 12.4.2 Suite
+- Serum 2.1.4 VST3
 - patched Wine 11.11 from `d2d1-dcomp-11.11`
 - niri 26.04
 - Xwayland rootful display at `2560x1440+0+0`
+- Xwayland launched with `-fakescreenfps 165` on the tested 165 Hz output
 - AMD Radeon RX 7900 GRE with RADV
 - WineD3D OpenGL renderer for Ableton and Serum 2
 - WebView2 forced away from DXVK per app
 - WineASIO/PipeWire playback available
-- Serum 2 VST3 installed and visually usable
+- Serum 2 VST3 installed and visually usable with DirectComposition and partial redraw enabled
 
 Observed checks:
 
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log reported clean startup with the patched WineD3D/OpenGL stack. If the host UI leaves stale redraw regions, enable `-_Feature.UseGpuRenderer` in `Options.txt`; this repo now does that by default.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
+- Ableton `Options.txt` contained `-_Feature.UseGpuRenderer` and did not contain `-_ForceOpenGlBackend`.
 - niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.
-- Serum 2 no longer showed the blue/blank UI seen under DXVK.
+- Serum 2 no longer showed the blue/blank UI seen under DXVK, and did not leave black stale rectangles across Ableton once `-_ForceOpenGlBackend` was removed.
 - Patched WineD3D/Vulkan was rejected after `wined3d.dll` asserted at `dlls/wined3d/cs.c:3261`, expression `flags & WINED3D_MAP_NOOVERWRITE`.
 
 ## License

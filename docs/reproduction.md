@@ -1,14 +1,15 @@
 # Reproduction Notes
 
-These notes capture the path that worked for Ableton Live 12.4.2 Suite on niri on June 29, 2026.
+These notes capture the path that worked for Ableton Live 12.4.2 Suite on niri on June 30, 2026.
 
 ## Machine
 
 - Ableton Live 12.4.2 Suite
+- Serum 2.1.4 VST3
 - patched Wine 11.11, branch `d2d1-dcomp-11.11`
 - niri 26.04
 - AMD Radeon RX 7900 GRE, RADV
-- `2560x1440` output at scale `1.0`
+- `2560x1440` output at scale `1.0`, tested at `165 Hz`
 - Wine prefix: `~/myWinePrefixes/abletonLive12`
 - Ableton executable: `C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe`
 - Serum 2 VST3 installed under the prefix's common VST3 directory
@@ -36,6 +37,12 @@ Rootful Xwayland tiled by niri:
 
 - Menu behavior was correct.
 - The outer niri tile was smaller than the inner Xwayland screen, causing blur and click offsets.
+
+Live forced OpenGL backend:
+
+- `-_ForceOpenGlBackend` could reduce one class of Ableton redraw issue.
+- With Serum 2.1.4, it caused black stale rectangles from Serum's editor path to spread into Ableton's host UI.
+- The launcher now removes this flag before startup.
 
 DXVK:
 
@@ -132,3 +139,4 @@ A good launch had these properties:
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.
+- Serum 2 did not leave black stale rectangles across Ableton when `-_ForceOpenGlBackend` was absent.
