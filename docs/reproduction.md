@@ -76,7 +76,7 @@ Serum 2 prefs should contain:
 ```json
 {
     "Disable DirectComposition": false,
-    "Disable Partial Redraw": true,
+    "Disable Partial Redraw": false,
     "Default Overview Type Is 3D": false
 }
 ```

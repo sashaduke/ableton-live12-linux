@@ -734,7 +734,7 @@ except Exception:
 
 if graphics == "d2d-opengl":
     data["Disable DirectComposition"] = False
-    data["Disable Partial Redraw"] = True
+    data["Disable Partial Redraw"] = False
 else:
     data["Disable DirectComposition"] = True
     data["Disable Partial Redraw"] = True
