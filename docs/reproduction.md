@@ -59,7 +59,8 @@ WINEPREFIX="$HOME/myWinePrefixes/abletonLive12" \
   'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d opengl /f
 
 Xwayland :20 -ac -terminate -geometry 2560x1440 -br -decorate
-DISPLAY=:20 WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b' \
+DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x0' \
+  WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b' \
   "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" explorer /desktop=AbletonLive12,2560x1440 \
   "C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe"
 ```
@@ -67,6 +68,8 @@ DISPLAY=:20 WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi
 The installer generalizes the display number and geometry.
 
 For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer`. The Vulkan renderer asserted with that path, but the OpenGL renderer starts cleanly, and Live's host UI can leave stale redraw regions when the GPU renderer is off.
+
+The launcher should also set `WINE_D3D_CONFIG=csmt=0x0`. Without that, Ableton's host UI can leave tracers or wait for another click/key event before repainting.
 
 Serum 2 prefs should contain:
 
@@ -125,6 +128,7 @@ A good launch had these properties:
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer; this is preferred for avoiding stale Ableton UI redraws under WineD3D/OpenGL.
+- Ableton's own UI repainted immediately after hotkeys with `WINE_D3D_CONFIG=csmt=0x0`.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.

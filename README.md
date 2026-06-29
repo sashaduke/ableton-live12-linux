@@ -105,6 +105,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Creates a `win64` Wine prefix when needed.
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
+- For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
@@ -149,21 +150,21 @@ Preferences.cfg.before-launch-geometry-autofix
 
 ## Stale Redraw Mitigations
 
-If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep Live's GPU renderer enabled. The launcher now writes `-_Feature.UseGpuRenderer` by default.
+If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep Live's GPU renderer enabled and disable WineD3D's multithreaded command stream. The launcher now does both by default: it writes `-_Feature.UseGpuRenderer` and sets `WINE_D3D_CONFIG=csmt=0x0`.
 
-If that regresses on your machine:
+If Live's GPU renderer regresses on your machine:
 
 ```bash
 ABLETON_LIVE_GPU_RENDERER=0 live
 ```
 
-If stale redraws persist with the GPU renderer enabled, try WineD3D without its multithreaded command stream:
+If you prefer WineD3D's default multithreaded command stream for performance testing:
 
 ```bash
-WINE_D3D_CONFIG=csmt=0x0 live
+WINE_D3D_CONFIG=csmt=0x1 live
 ```
 
-That can reduce async repaint artifacts, but may cost UI/GPU performance.
+That may improve performance, but can bring back async repaint artifacts on Ableton's host UI.
 
 ## Options
 

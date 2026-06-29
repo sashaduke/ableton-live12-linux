@@ -537,6 +537,10 @@ export WINEPREFIX="$ABLETON_WINEPREFIX"
 export WINEARCH
 export WINEDEBUG
 
+if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
+  export WINE_D3D_CONFIG="${WINE_D3D_CONFIG:-csmt=0x0}"
+fi
+
 wine_cmd="${WINE_BIN:-wine}"
 winepath_cmd="${WINEPATH_BIN:-winepath}"
 
