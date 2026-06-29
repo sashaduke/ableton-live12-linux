@@ -106,6 +106,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
+- Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
@@ -140,6 +141,12 @@ The launcher detects the focused niri output size and patches the saved Ableton 
 
 ```bash
 LIVE_WINDOW_WIDTH=1920 LIVE_WINDOW_HEIGHT=1080 live
+```
+
+Override rootful Xwayland's advertised refresh rate:
+
+```bash
+LIVE_REFRESH_RATE=165 live
 ```
 
 The first time it patches a preferences file, it writes:
@@ -179,6 +186,7 @@ That may improve performance, but can bring back async repaint artifacts on Able
 --wine-repo URL        Patched Wine repo
 --width PX             Override launch-time geometry width
 --height PX            Override launch-time geometry height
+--refresh HZ           Override launch-time rootful Xwayland refresh
 --no-create-prefix     Do not create the Wine prefix
 --no-install-ableton   Do not run or auto-detect a local Ableton installer
 --skip-patched-wine    Do not clone/build patched Wine

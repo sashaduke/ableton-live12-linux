@@ -41,6 +41,7 @@ Options:
   --wine-repo URL        Patched Wine repo. Default: https://github.com/giang17/wine.git
   --width PX             Override launch-time geometry width, saved into launcher env
   --height PX            Override launch-time geometry height, saved into launcher env
+  --refresh HZ           Override launch-time rootful Xwayland refresh, saved into launcher env
   --no-create-prefix     Do not create the Wine prefix when it is missing
   --no-install-ableton   Do not run or auto-detect a local Ableton installer
   --skip-patched-wine    Do not clone/build the patched Wine tree
@@ -138,6 +139,11 @@ while [[ $# -gt 0 ]]; do
       export LIVE_WINDOW_HEIGHT="$2"
       shift 2
       ;;
+    --refresh)
+      [[ $# -ge 2 ]] || die "--refresh needs a number"
+      export LIVE_REFRESH_RATE="$2"
+      shift 2
+      ;;
     --no-create-prefix)
       create_prefix=0
       shift
@@ -196,6 +202,10 @@ fi
 
 if [[ -n "${LIVE_WINDOW_HEIGHT:-}" && ! "${LIVE_WINDOW_HEIGHT:-}" =~ ^[0-9]+$ ]]; then
   die "--height must be numeric"
+fi
+
+if [[ -n "${LIVE_REFRESH_RATE:-}" && ! "${LIVE_REFRESH_RATE:-}" =~ ^[0-9]+$ ]]; then
+  die "--refresh must be numeric"
 fi
 
 uses_patched_wine() {
@@ -526,6 +536,9 @@ set -euo pipefail
 : "${ABLETON_WINE_ROOT:=__ABLETON_WINE_ROOT__}"
 : "${ABLETON_GRAPHICS_STACK:=__ABLETON_GRAPHICS_STACK__}"
 : "${ABLETON_LIVE_GPU_RENDERER:=1}"
+: "${LIVE_WINDOW_WIDTH:=__LIVE_WINDOW_WIDTH__}"
+: "${LIVE_WINDOW_HEIGHT:=__LIVE_WINDOW_HEIGHT__}"
+: "${LIVE_REFRESH_RATE:=__LIVE_REFRESH_RATE__}"
 : "${WINEARCH:=win64}"
 : "${WINEDEBUG:=-all}"
 
@@ -596,6 +609,37 @@ except Exception:
   fi
 
   printf '2560 1440\n'
+}
+
+detect_target_refresh() {
+  if [[ -n "${LIVE_REFRESH_RATE:-}" ]]; then
+    printf '%s\n' "$LIVE_REFRESH_RATE"
+    return 0
+  fi
+
+  if command -v niri >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    local refresh
+    refresh="$(
+      niri msg -j focused-output 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    modes = data.get("modes") or []
+    current = int(data.get("current_mode"))
+    rate = int(modes[current].get("refresh_rate") or 0)
+    if rate > 0:
+        print(max(1, min(600, round(rate / 1000))))
+except Exception:
+    pass
+' 2>/dev/null || true
+    )"
+    if [[ -n "$refresh" ]]; then
+      printf '%s\n' "$refresh"
+      return 0
+    fi
+  fi
+
+  printf '60\n'
 }
 
 patch_ableton_geometry() {
@@ -785,17 +829,23 @@ COMMON
       launcher_wine_root=""
     fi
 
-    python3 - "$common" "$prefix" "$launcher_wine_root" "$graphics_stack" <<'PY'
+    python3 - "$common" "$prefix" "$launcher_wine_root" "$graphics_stack" "${LIVE_WINDOW_WIDTH:-}" "${LIVE_WINDOW_HEIGHT:-}" "${LIVE_REFRESH_RATE:-}" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 prefix = sys.argv[2]
 wine_root = sys.argv[3]
 graphics = sys.argv[4]
+width = sys.argv[5]
+height = sys.argv[6]
+refresh = sys.argv[7]
 text = path.read_text()
 text = text.replace("__ABLETON_WINEPREFIX__", prefix)
 text = text.replace("__ABLETON_WINE_ROOT__", wine_root)
 text = text.replace("__ABLETON_GRAPHICS_STACK__", graphics)
+text = text.replace("__LIVE_WINDOW_WIDTH__", width)
+text = text.replace("__LIVE_WINDOW_HEIGHT__", height)
+text = text.replace("__LIVE_REFRESH_RATE__", refresh)
 path.write_text(text)
 PY
     chmod +x "$common"
@@ -857,11 +907,12 @@ exe_windows="$(find_ableton_exe_windows)"
 
 display="$(find_free_display)"
 read -r width height < <(detect_target_geometry)
+refresh="$(detect_target_refresh)"
 log_dir="$HOME/.cache/ableton-live12/rootful-xwayland"
 mkdir -p "$log_dir"
 xwayland_log="$log_dir/xwayland-${display#:}.log"
 
-Xwayland "$display" -ac -terminate -geometry "${width}x${height}" -br -decorate >"$xwayland_log" 2>&1 &
+Xwayland "$display" -ac -terminate -geometry "${width}x${height}" -fakescreenfps "$refresh" -br -decorate >"$xwayland_log" 2>&1 &
 xwayland_pid=$!
 trap 'kill "$xwayland_pid" 2>/dev/null || true' EXIT
 
@@ -1113,6 +1164,9 @@ If the command is not found, add this to your shell PATH:
 
 For fixed geometry on non-2560x1440 screens, launch like:
   LIVE_WINDOW_WIDTH=1920 LIVE_WINDOW_HEIGHT=1080 live
+
+For fixed refresh on high-refresh screens, launch like:
+  LIVE_REFRESH_RATE=165 live
 
 EOF
 }
