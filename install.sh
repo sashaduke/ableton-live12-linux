@@ -1,0 +1,845 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_name="ableton-live12-linux"
+default_prefix="$HOME/myWinePrefixes/abletonLive12"
+prefix="${ABLETON_WINEPREFIX:-$default_prefix}"
+bin_dir="${BIN_DIR:-$HOME/.local/bin}"
+support_dir="${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux"
+niri_config="${NIRI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl}"
+default_backend="rootful-xwayland"
+install_arch_deps=0
+create_prefix=1
+configure_dxvk=1
+configure_niri=1
+configure_wine=1
+run_installer=1
+installer_path="${ABLETON_INSTALLER:-}"
+dry_run=0
+
+usage() {
+  cat <<'EOF'
+Install Ableton Live 12 Wine/niri launchers.
+
+Usage:
+  ./install.sh [options]
+
+Options:
+  --prefix PATH          Wine prefix. Default: ~/myWinePrefixes/abletonLive12
+  --installer PATH       Run a local Ableton Live 12 installer in the prefix
+  --backend NAME         Default "live" backend: rootful-xwayland, wayland, or xwayland
+  --width PX             Override launch-time geometry width, saved into launcher env
+  --height PX            Override launch-time geometry height, saved into launcher env
+  --no-create-prefix     Do not create the Wine prefix when it is missing
+  --no-install-ableton   Do not run or auto-detect a local Ableton installer
+  --skip-niri            Do not install the niri main-window rule
+  --skip-wine-config     Do not write Wine registry settings
+  --skip-dxvk            Do not run "winetricks -q dxvk"
+  --install-arch-deps    Install common Arch packages with pacman/paru
+  --dry-run              Print what would happen without writing files
+  -h, --help             Show this help
+
+After install:
+  live                    Rootful Xwayland launcher, recommended for niri
+  live-rootful-xwayland   Same as the default when --backend rootful-xwayland is used
+  live-wayland            Native Wine Wayland fallback
+  live-xwayland           Rootless/Xwayland-satellite fallback
+
+This script does not download, crack, activate, or distribute Ableton Live.
+It can run a local licensed Ableton Live 12 installer if you provide one.
+EOF
+}
+
+log() {
+  printf '[%s] %s\n' "$repo_name" "$*"
+}
+
+warn() {
+  printf '[%s] warning: %s\n' "$repo_name" "$*" >&2
+}
+
+die() {
+  printf '[%s] error: %s\n' "$repo_name" "$*" >&2
+  exit 1
+}
+
+run() {
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf '+'
+    printf ' %q' "$@"
+    printf '\n'
+  else
+    "$@"
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prefix)
+      [[ $# -ge 2 ]] || die "--prefix needs a path"
+      prefix="$2"
+      shift 2
+      ;;
+    --installer)
+      [[ $# -ge 2 ]] || die "--installer needs a path"
+      installer_path="$2"
+      run_installer=1
+      shift 2
+      ;;
+    --backend)
+      [[ $# -ge 2 ]] || die "--backend needs wayland or xwayland"
+      default_backend="$2"
+      shift 2
+      ;;
+    --width)
+      [[ $# -ge 2 ]] || die "--width needs a number"
+      export LIVE_WINDOW_WIDTH="$2"
+      shift 2
+      ;;
+    --height)
+      [[ $# -ge 2 ]] || die "--height needs a number"
+      export LIVE_WINDOW_HEIGHT="$2"
+      shift 2
+      ;;
+    --no-create-prefix)
+      create_prefix=0
+      shift
+      ;;
+    --no-install-ableton)
+      run_installer=0
+      shift
+      ;;
+    --skip-niri)
+      configure_niri=0
+      shift
+      ;;
+    --skip-wine-config)
+      configure_wine=0
+      shift
+      ;;
+    --skip-dxvk)
+      configure_dxvk=0
+      shift
+      ;;
+    --install-arch-deps)
+      install_arch_deps=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+case "$default_backend" in
+  rootful-xwayland|wayland|xwayland) ;;
+  *) die "--backend must be rootful-xwayland, wayland, or xwayland" ;;
+esac
+
+if [[ -n "${LIVE_WINDOW_WIDTH:-}" && ! "${LIVE_WINDOW_WIDTH:-}" =~ ^[0-9]+$ ]]; then
+  die "--width must be numeric"
+fi
+
+if [[ -n "${LIVE_WINDOW_HEIGHT:-}" && ! "${LIVE_WINDOW_HEIGHT:-}" =~ ^[0-9]+$ ]]; then
+  die "--height must be numeric"
+fi
+
+ableton_running() {
+  pgrep -f '[A]bleton Live 12 .*\.exe' >/dev/null 2>&1
+}
+
+find_installed_ableton_exe() {
+  local candidates=()
+  shopt -s nullglob
+  candidates=(
+    "$prefix"/drive_c/ProgramData/Ableton/Live\ 12*/Program/Ableton\ Live\ 12*.exe
+    "$prefix"/drive_c/Program\ Files/Ableton/Live\ 12*/Program/Ableton\ Live\ 12*.exe
+  )
+  shopt -u nullglob
+
+  if [[ "${#candidates[@]}" -gt 0 ]]; then
+    printf '%s\n' "${candidates[0]}"
+  fi
+}
+
+find_local_ableton_installer() {
+  if [[ -n "$installer_path" ]]; then
+    printf '%s\n' "$installer_path"
+    return 0
+  fi
+
+  local candidates=()
+  shopt -s nullglob nocaseglob
+  candidates=(
+    "$PWD"/*Ableton*Live*12*.exe
+    "$PWD"/*ableton*live*12*.exe
+    "$HOME"/Downloads/*Ableton*Live*12*.exe
+    "$HOME"/Downloads/*ableton*live*12*.exe
+  )
+  shopt -u nullglob nocaseglob
+
+  if [[ "${#candidates[@]}" -eq 1 ]]; then
+    printf '%s\n' "${candidates[0]}"
+  elif [[ "${#candidates[@]}" -gt 1 ]]; then
+    warn "multiple Ableton installers found; pass one explicitly with --installer PATH"
+    printf '%s\n' "${candidates[@]}" >&2
+  fi
+}
+
+install_common_arch_deps() {
+  [[ "$install_arch_deps" -eq 1 ]] || return 0
+
+  if ! command -v pacman >/dev/null 2>&1; then
+    warn "--install-arch-deps was requested, but pacman is not installed"
+    return 0
+  fi
+
+  local packages=(
+    wine-staging
+    winetricks
+    wineasio
+    xorg-xwayland
+    xwayland-satellite
+    pipewire-jack
+    python
+    perl
+  )
+
+  log "Installing common Arch dependencies"
+  if command -v paru >/dev/null 2>&1; then
+    run paru -S --needed "${packages[@]}"
+  elif command -v yay >/dev/null 2>&1; then
+    run yay -S --needed "${packages[@]}"
+  else
+    run sudo pacman -S --needed "${packages[@]}"
+  fi
+}
+
+create_wine_prefix_if_needed() {
+  [[ "$create_prefix" -eq 1 ]] || return 0
+
+  if [[ -d "$prefix/drive_c" ]]; then
+    return 0
+  fi
+
+  command -v wineboot >/dev/null 2>&1 || command -v wine >/dev/null 2>&1 || {
+    warn "Wine is not installed, so the prefix cannot be created yet"
+    warn "Install Wine, then rerun this script"
+    return 0
+  }
+
+  if ableton_running; then
+    warn "Ableton is running; not creating/updating the Wine prefix"
+    return 0
+  fi
+
+  log "Creating Wine prefix at $prefix"
+  run mkdir -p "$prefix"
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would run: WINEPREFIX=$prefix WINEARCH=win64 wineboot -u"
+  else
+    WINEPREFIX="$prefix" WINEARCH=win64 wineboot -u
+    WINEPREFIX="$prefix" wineserver -w || true
+  fi
+}
+
+register_wineasio_if_available() {
+  command -v wineasio-register >/dev/null 2>&1 || return 0
+  [[ -d "$prefix/drive_c" ]] || return 0
+  ableton_running && return 0
+
+  log "Registering wineasio in the prefix"
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would run: WINEPREFIX=$prefix wineasio-register"
+  else
+    WINEPREFIX="$prefix" WINEARCH=win64 wineasio-register || warn "wineasio-register failed; continuing"
+  fi
+}
+
+run_ableton_installer_if_needed() {
+  [[ "$run_installer" -eq 1 ]] || return 0
+
+  if [[ -n "$(find_installed_ableton_exe)" ]]; then
+    log "Ableton Live already appears to be installed in the prefix"
+    return 0
+  fi
+
+  command -v wine >/dev/null 2>&1 || {
+    warn "Wine is not installed, so the Ableton installer cannot run"
+    return 0
+  }
+  [[ -d "$prefix/drive_c" ]] || {
+    warn "Wine prefix does not exist yet, so the Ableton installer cannot run"
+    return 0
+  }
+  if ableton_running; then
+    warn "Ableton is running; skipping installer"
+    return 0
+  fi
+
+  local installer
+  installer="$(find_local_ableton_installer || true)"
+  if [[ -z "$installer" ]]; then
+    warn "No local Ableton Live 12 installer found"
+    warn "Download your licensed Ableton installer, then rerun with: --installer /path/to/installer.exe"
+    return 0
+  fi
+  [[ -f "$installer" ]] || die "installer not found: $installer"
+
+  log "Running Ableton installer in the Wine prefix"
+  log "Installer: $installer"
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would run: WINEPREFIX=$prefix wine $installer"
+  else
+    WINEPREFIX="$prefix" WINEARCH=win64 wine "$installer"
+    WINEPREFIX="$prefix" wineserver -w || true
+  fi
+}
+
+write_file_from_template() {
+  local path="$1"
+  local marker="$2"
+  local tmp
+  tmp="$(mktemp)"
+  cat >"$tmp"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would write $path"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$path")"
+  if [[ -f "$path" ]]; then
+    cp -a "$path" "$path.before-$marker-$(date +%Y%m%d-%H%M%S)"
+  fi
+  mv "$tmp" "$path"
+  chmod +x "$path"
+}
+
+write_launchers() {
+  log "Installing launchers into $bin_dir"
+  run mkdir -p "$bin_dir" "$support_dir"
+
+  local common="$support_dir/common.sh"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would write $common"
+  else
+    cat >"$common" <<'COMMON'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${ABLETON_WINEPREFIX:=__ABLETON_WINEPREFIX__}"
+: "${WINEARCH:=win64}"
+: "${WINEDEBUG:=-all}"
+
+export WINEPREFIX="$ABLETON_WINEPREFIX"
+export WINEARCH
+export WINEDEBUG
+
+dxvk_log_dir="${DXVK_LOG_PATH:-$HOME/.cache/ableton-live12/dxvk}"
+mkdir -p "$dxvk_log_dir"
+export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-info}"
+export DXVK_LOG_PATH="$dxvk_log_dir"
+
+webview2_flags="--disable-gpu --disable-gpu-compositing --disable-direct-composition --disable-accelerated-2d-canvas"
+if [[ -n "${WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:-}" ]]; then
+  export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="$WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS $webview2_flags"
+else
+  export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="$webview2_flags"
+fi
+
+export PIPEWIRE_LATENCY="${PIPEWIRE_LATENCY:-256/48000}"
+export WINEASIO_NUMBER_INPUTS="${WINEASIO_NUMBER_INPUTS:-2}"
+export WINEASIO_NUMBER_OUTPUTS="${WINEASIO_NUMBER_OUTPUTS:-2}"
+export WINEASIO_FIXED_BUFFERSIZE="${WINEASIO_FIXED_BUFFERSIZE:-on}"
+export WINEASIO_PREFERRED_BUFFERSIZE="${WINEASIO_PREFERRED_BUFFERSIZE:-256}"
+export WINEASIO_CONNECT_TO_HARDWARE="${WINEASIO_CONNECT_TO_HARDWARE:-on}"
+
+ableton_running() {
+  pgrep -f '[A]bleton Live 12 .*\.exe' >/dev/null 2>&1
+}
+
+detect_target_geometry() {
+  if [[ -n "${LIVE_WINDOW_WIDTH:-}" && -n "${LIVE_WINDOW_HEIGHT:-}" ]]; then
+    printf '%s %s\n' "$LIVE_WINDOW_WIDTH" "$LIVE_WINDOW_HEIGHT"
+    return 0
+  fi
+
+  if command -v niri >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    local geometry
+    geometry="$(
+      niri msg -j focused-output 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    logical = data.get("logical") or {}
+    width = int(logical.get("width") or 0)
+    height = int(logical.get("height") or 0)
+    if width > 0 and height > 0:
+        print(f"{width} {height}")
+except Exception:
+    pass
+' 2>/dev/null || true
+    )"
+    if [[ -n "$geometry" ]]; then
+      printf '%s\n' "$geometry"
+      return 0
+    fi
+  fi
+
+  printf '2560 1440\n'
+}
+
+patch_ableton_geometry() {
+  command -v perl >/dev/null 2>&1 || return 0
+  ableton_running && return 0
+
+  local target_w target_h
+  read -r target_w target_h < <(detect_target_geometry)
+  [[ "$target_w" =~ ^[0-9]+$ && "$target_h" =~ ^[0-9]+$ ]] || return 0
+
+  local prefs_base="$WINEPREFIX/drive_c/users/$USER/AppData/Roaming/Ableton"
+  local prefs_files=()
+  shopt -s nullglob
+  prefs_files=("$prefs_base"/Live\ 12*/Preferences/Preferences.cfg)
+  shopt -u nullglob
+
+  local prefs
+  for prefs in "${prefs_files[@]}"; do
+    [[ -f "$prefs" ]] || continue
+    local backup="$prefs.before-launch-geometry-autofix"
+    [[ -e "$backup" ]] || cp -a "$prefs" "$backup"
+
+    LIVE_TARGET_WIDTH="$target_w" LIVE_TARGET_HEIGHT="$target_h" perl -0777 -i -pe '
+      my $target_w = pack("V", int($ENV{LIVE_TARGET_WIDTH} || 2560));
+      my $target_h = pack("V", int($ENV{LIVE_TARGET_HEIGHT} || 1440));
+      my $patched = 0;
+
+      s{
+        (\x10RemoteableString\x03\x00\x00\x00.{8})
+        (.{4})(.{4})
+        (\x00\x00\x01\x02)
+      }{
+        my ($prefix, $w, $h, $suffix) = ($1, $2, $3, $4);
+        my $old_w = unpack("V", $w);
+        my $old_h = unpack("V", $h);
+
+        if (!$patched && $old_w >= 1000 && $old_w <= 10000 && $old_h >= 700 && $old_h <= 10000) {
+          $patched = 1;
+          $prefix . $target_w . $target_h . $suffix;
+        } else {
+          $&;
+        }
+      }gsex;
+    ' "$prefs"
+  done
+}
+
+enable_gpu_renderer_option() {
+  ableton_running && return 0
+
+  local prefs_base="$WINEPREFIX/drive_c/users/$USER/AppData/Roaming/Ableton"
+  local pref_dirs=()
+  shopt -s nullglob
+  pref_dirs=("$prefs_base"/Live\ 12*/Preferences)
+  shopt -u nullglob
+
+  local pref_dir options
+  for pref_dir in "${pref_dirs[@]}"; do
+    [[ -d "$pref_dir" ]] || continue
+    options="$pref_dir/Options.txt"
+    touch "$options"
+    grep -qxF -- '-_Feature.UseGpuRenderer' "$options" || printf '%s\n' '-_Feature.UseGpuRenderer' >>"$options"
+  done
+}
+
+ensure_webview2_builtin_overrides() {
+  command -v wine >/dev/null 2>&1 || return 0
+  ableton_running && return 0
+
+  local key='HKCU\Software\Wine\AppDefaults\msedgewebview2.exe\DllOverrides'
+  local dll
+  for dll in d3d11 dxgi d2d1; do
+    WINEDEBUG=-all wine reg add "$key" /v "$dll" /t REG_SZ /d builtin /f >/dev/null 2>&1 || true
+  done
+}
+
+find_ableton_exe() {
+  if [[ -n "${ABLETON_EXE:-}" ]]; then
+    printf '%s\n' "$ABLETON_EXE"
+    return 0
+  fi
+
+  local candidates=()
+  shopt -s nullglob
+  candidates=(
+    "$WINEPREFIX"/drive_c/ProgramData/Ableton/Live\ 12*/Program/Ableton\ Live\ 12*.exe
+    "$WINEPREFIX"/drive_c/Program\ Files/Ableton/Live\ 12*/Program/Ableton\ Live\ 12*.exe
+  )
+  shopt -u nullglob
+
+  if [[ "${#candidates[@]}" -gt 0 ]]; then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+
+  printf '%s\n' "$WINEPREFIX/drive_c/ProgramData/Ableton/Live 12 Suite/Program/Ableton Live 12 Suite.exe"
+}
+
+find_ableton_exe_windows() {
+  local exe
+  exe="$(find_ableton_exe)"
+  [[ -f "$exe" ]] || {
+    printf '%s\n' 'C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe'
+    return 0
+  }
+
+  if command -v winepath >/dev/null 2>&1; then
+    winepath -w "$exe" 2>/dev/null && return 0
+  fi
+
+  printf '%s\n' 'C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe'
+}
+
+preflight_ableton() {
+  ensure_webview2_builtin_overrides
+  patch_ableton_geometry
+  enable_gpu_renderer_option
+}
+
+run_ableton() {
+  preflight_ableton
+
+  local exe
+  exe="$(find_ableton_exe)"
+  if [[ ! -f "$exe" ]]; then
+    cat >&2 <<EOF
+Ableton Live executable was not found:
+  $exe
+
+Set ABLETON_EXE to the .exe path, or install Ableton Live 12 into:
+  $WINEPREFIX
+EOF
+    exit 1
+  fi
+
+  if command -v pw-jack >/dev/null 2>&1; then
+    exec pw-jack wine "$exe" "$@"
+  fi
+
+  exec wine "$exe" "$@"
+}
+COMMON
+
+    python3 - "$common" "$prefix" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+prefix = sys.argv[2]
+path.write_text(path.read_text().replace("__ABLETON_WINEPREFIX__", prefix))
+PY
+    chmod +x "$common"
+  fi
+
+  write_file_from_template "$support_dir/live-rootful-xwayland" "ableton-live12-linux" <<'ROOTFUL_XWAYLAND'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
+
+find_free_display() {
+  local n
+  for n in $(seq 20 99); do
+    [[ -e "/tmp/.X11-unix/X$n" ]] && continue
+    printf ':%s\n' "$n"
+    return 0
+  done
+  return 1
+}
+
+wait_for_display() {
+  local display="$1"
+  local socket="/tmp/.X11-unix/X${display#:}"
+  local i
+  for i in $(seq 1 80); do
+    [[ -S "$socket" ]] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+preflight_ableton
+
+if ! command -v Xwayland >/dev/null 2>&1; then
+  echo "Xwayland is not installed." >&2
+  exit 1
+fi
+
+exe="$(find_ableton_exe)"
+if [[ ! -f "$exe" ]]; then
+  cat >&2 <<EOF
+Ableton Live executable was not found:
+  $exe
+
+Set ABLETON_EXE to the .exe path, or install Ableton Live 12 into:
+  $WINEPREFIX
+EOF
+  exit 1
+fi
+exe_windows="$(find_ableton_exe_windows)"
+
+display="$(find_free_display)"
+read -r width height < <(detect_target_geometry)
+log_dir="$HOME/.cache/ableton-live12/rootful-xwayland"
+mkdir -p "$log_dir"
+xwayland_log="$log_dir/xwayland-${display#:}.log"
+
+Xwayland "$display" -ac -terminate -geometry "${width}x${height}" -br -decorate >"$xwayland_log" 2>&1 &
+xwayland_pid=$!
+trap 'kill "$xwayland_pid" 2>/dev/null || true' EXIT
+
+if ! wait_for_display "$display"; then
+  echo "Timed out waiting for rootful Xwayland display $display. Log: $xwayland_log" >&2
+  exit 1
+fi
+
+export DISPLAY="$display"
+export GDK_BACKEND=x11
+export QT_QPA_PLATFORM=xcb
+export SDL_VIDEODRIVER=x11
+export CLUTTER_BACKEND=x11
+
+if command -v pw-jack >/dev/null 2>&1; then
+  exec pw-jack wine explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+fi
+
+exec wine explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+ROOTFUL_XWAYLAND
+
+  write_file_from_template "$support_dir/live-wayland" "ableton-live12-linux" <<'WAYLAND'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d}"
+
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+  for socket in "$runtime_dir"/wayland-*; do
+    [[ -S "$socket" ]] || continue
+    export WAYLAND_DISPLAY="${socket##*/}"
+    break
+  done
+fi
+
+if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+  echo "No Wayland socket found under $runtime_dir" >&2
+  exit 1
+fi
+
+unset DISPLAY
+unset GDK_BACKEND
+unset QT_QPA_PLATFORM
+unset SDL_VIDEODRIVER
+unset CLUTTER_BACKEND
+
+run_ableton "$@"
+WAYLAND
+
+  write_file_from_template "$support_dir/live-xwayland" "ableton-live12-linux" <<'XWAYLAND'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
+
+unset WAYLAND_DISPLAY
+export DISPLAY="${DISPLAY:-:1}"
+export GDK_BACKEND=x11
+export QT_QPA_PLATFORM=xcb
+export SDL_VIDEODRIVER=x11
+export CLUTTER_BACKEND=x11
+
+run_ableton "$@"
+XWAYLAND
+
+  if [[ "$dry_run" -eq 0 ]]; then
+    ln -sfn "$support_dir/live-rootful-xwayland" "$bin_dir/live-rootful-xwayland"
+    ln -sfn "$support_dir/live-wayland" "$bin_dir/live-wayland"
+    ln -sfn "$support_dir/live-xwayland" "$bin_dir/live-xwayland"
+    case "$default_backend" in
+      rootful-xwayland) ln -sfn "$support_dir/live-rootful-xwayland" "$bin_dir/live" ;;
+      wayland) ln -sfn "$support_dir/live-wayland" "$bin_dir/live" ;;
+      xwayland) ln -sfn "$support_dir/live-xwayland" "$bin_dir/live" ;;
+    esac
+  else
+    log "Would link live, live-rootful-xwayland, live-wayland, and live-xwayland in $bin_dir"
+  fi
+}
+
+install_niri_rule() {
+  [[ "$configure_niri" -eq 1 ]] || return 0
+  [[ -f "$niri_config" ]] || {
+    warn "niri config not found at $niri_config; skipping niri rule"
+    return 0
+  }
+
+  log "Installing niri rootful-Xwayland rule"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would patch $niri_config"
+    return 0
+  fi
+
+  local backup="$niri_config.before-ableton-live12-linux-$(date +%Y%m%d-%H%M%S)"
+  cp -a "$niri_config" "$backup"
+
+  python3 - "$niri_config" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+begin = "// BEGIN ableton-live12-linux"
+end = "// END ableton-live12-linux"
+block = """// BEGIN ableton-live12-linux
+window-rule {
+    match app-id="org.freedesktop.Xwayland" title=r#"^Xwayland on :[0-9]+$"#
+    open-floating true
+    draw-border-with-background false
+    geometry-corner-radius 0
+    clip-to-geometry false
+}
+// END ableton-live12-linux
+"""
+
+pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end) + r"\n?", re.S)
+if pattern.search(text):
+    text = pattern.sub(block, text)
+else:
+    match = re.search(r"(?m)^binds\s*\{", text)
+    if match:
+        text = text[:match.start()] + block + text[match.start():]
+    else:
+        text = text.rstrip() + "\n" + block
+
+path.write_text(text)
+PY
+
+  if command -v niri >/dev/null 2>&1; then
+    if ! niri validate >/dev/null; then
+      cp -a "$backup" "$niri_config"
+      die "niri config validation failed; restored $backup"
+    fi
+    niri msg action load-config-file >/dev/null 2>&1 || true
+  fi
+}
+
+configure_wine_registry() {
+  [[ "$configure_wine" -eq 1 ]] || return 0
+  command -v wine >/dev/null 2>&1 || {
+    warn "wine not found; skipping Wine registry configuration"
+    return 0
+  }
+  [[ -d "$prefix" ]] || {
+    warn "Wine prefix does not exist yet: $prefix"
+    warn "Launchers were installed; rerun install.sh after creating the prefix to apply registry settings"
+    return 0
+  }
+  if ableton_running; then
+    warn "Ableton is running; skipping Wine registry writes for this install"
+    return 0
+  fi
+
+  log "Configuring Wine registry for DXVK/high-DPI/rootful Xwayland"
+
+  local reg=(env WINEPREFIX="$prefix" WINEARCH=win64 wine reg add)
+  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d8' /t REG_SZ /d native /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d9' /t REG_SZ /d native /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d10core' /t REG_SZ /d native /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d11' /t REG_SZ /d native /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dxgi' /t REG_SZ /d native /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v Decorated /t REG_SZ /d N /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v Managed /t REG_SZ /d Y /f >/dev/null
+  run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v UseTakeFocus /t REG_SZ /d N /f >/dev/null
+  run "${reg[@]}" 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 96 /f >/dev/null
+
+  local webview_key='HKCU\Software\Wine\AppDefaults\msedgewebview2.exe\DllOverrides'
+  run "${reg[@]}" "$webview_key" /v d3d11 /t REG_SZ /d builtin /f >/dev/null
+  run "${reg[@]}" "$webview_key" /v dxgi /t REG_SZ /d builtin /f >/dev/null
+  run "${reg[@]}" "$webview_key" /v d2d1 /t REG_SZ /d builtin /f >/dev/null
+
+  local exe_path='C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe'
+  run "${reg[@]}" 'HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' /v "$exe_path" /t REG_SZ /d '~ HIGHDPIAWARE' /f >/dev/null
+}
+
+install_dxvk_if_requested() {
+  [[ "$configure_dxvk" -eq 1 ]] || return 0
+  command -v winetricks >/dev/null 2>&1 || {
+    warn "DXVK setup requested, but winetricks is not installed"
+    return 0
+  }
+  [[ -d "$prefix" ]] || {
+    warn "DXVK setup requested, but prefix does not exist: $prefix"
+    return 0
+  }
+  if ableton_running; then
+    warn "Ableton is running; skipping winetricks dxvk"
+    return 0
+  fi
+
+  log "Installing DXVK into prefix with winetricks"
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would run: WINEPREFIX=$prefix winetricks -q dxvk"
+  else
+    WINEPREFIX="$prefix" WINEARCH=win64 winetricks -q dxvk || warn "winetricks dxvk failed; launchers were still installed"
+  fi
+}
+
+print_summary() {
+  cat <<EOF
+
+Installed Ableton Live 12 Linux launchers.
+
+Commands:
+  live                    Default launcher ($default_backend)
+  live-rootful-xwayland   Rootful Xwayland launcher, recommended under niri
+  live-wayland            Native Wine Wayland fallback
+  live-xwayland           Rootless/Xwayland-satellite fallback
+
+Prefix:
+  $prefix
+
+If the command is not found, add this to your shell PATH:
+  $bin_dir
+
+For fixed geometry on non-2560x1440 screens, launch like:
+  LIVE_WINDOW_WIDTH=1920 LIVE_WINDOW_HEIGHT=1080 live
+
+EOF
+}
+
+install_common_arch_deps
+create_wine_prefix_if_needed
+configure_wine_registry
+install_dxvk_if_requested
+register_wineasio_if_available
+run_ableton_installer_if_needed
+write_launchers
+install_niri_rule
+print_summary
