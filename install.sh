@@ -317,6 +317,15 @@ write_file_from_template() {
     return 0
   fi
 
+  python3 - "$tmp" "$support_dir" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+support_dir = sys.argv[2]
+path.write_text(path.read_text().replace("__SUPPORT_DIR__", support_dir))
+PY
+
   mkdir -p "$(dirname "$path")"
   if [[ -f "$path" ]]; then
     cp -a "$path" "$path.before-$marker-$(date +%Y%m%d-%H%M%S)"
@@ -555,7 +564,7 @@ PY
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
 
@@ -632,7 +641,7 @@ ROOTFUL_XWAYLAND
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d}"
 
@@ -663,7 +672,7 @@ WAYLAND
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux/common.sh"
+source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
 
