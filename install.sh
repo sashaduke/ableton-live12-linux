@@ -8,6 +8,12 @@ bin_dir="${BIN_DIR:-$HOME/.local/bin}"
 support_dir="${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux"
 niri_config="${NIRI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl}"
 default_backend="rootful-xwayland"
+graphics_stack="${ABLETON_GRAPHICS_STACK:-d2d-opengl}"
+patched_wine_repo="${ABLETON_PATCHED_WINE_REPO:-https://github.com/giang17/wine.git}"
+patched_wine_branch="${ABLETON_PATCHED_WINE_BRANCH:-d2d1-dcomp-11.11}"
+patched_wine_source="${ABLETON_PATCHED_WINE_SOURCE:-$HOME/src/wine-d2d1}"
+patched_wine_root="${ABLETON_PATCHED_WINE_ROOT:-$HOME/.local/opt/wine-d2d1-11.11}"
+build_patched_wine=1
 install_arch_deps=0
 create_prefix=1
 configure_dxvk=1
@@ -28,10 +34,16 @@ Options:
   --prefix PATH          Wine prefix. Default: ~/myWinePrefixes/abletonLive12
   --installer PATH       Run a local Ableton Live 12 installer in the prefix
   --backend NAME         Default "live" backend: rootful-xwayland, wayland, or xwayland
+  --graphics NAME        d2d-opengl, dxvk, or system. Default: d2d-opengl
+  --wine-root PATH       Patched Wine install root. Default: ~/.local/opt/wine-d2d1-11.11
+  --wine-source PATH     Patched Wine source checkout. Default: ~/src/wine-d2d1
+  --wine-branch NAME     Patched Wine branch. Default: d2d1-dcomp-11.11
+  --wine-repo URL        Patched Wine repo. Default: https://github.com/giang17/wine.git
   --width PX             Override launch-time geometry width, saved into launcher env
   --height PX            Override launch-time geometry height, saved into launcher env
   --no-create-prefix     Do not create the Wine prefix when it is missing
   --no-install-ableton   Do not run or auto-detect a local Ableton installer
+  --skip-patched-wine    Do not clone/build the patched Wine tree
   --skip-niri            Do not install the niri main-window rule
   --skip-wine-config     Do not write Wine registry settings
   --skip-dxvk            Do not run "winetricks -q dxvk"
@@ -87,8 +99,33 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --backend)
-      [[ $# -ge 2 ]] || die "--backend needs wayland or xwayland"
+      [[ $# -ge 2 ]] || die "--backend needs rootful-xwayland, wayland, or xwayland"
       default_backend="$2"
+      shift 2
+      ;;
+    --graphics)
+      [[ $# -ge 2 ]] || die "--graphics needs d2d-opengl, dxvk, or system"
+      graphics_stack="$2"
+      shift 2
+      ;;
+    --wine-root)
+      [[ $# -ge 2 ]] || die "--wine-root needs a path"
+      patched_wine_root="$2"
+      shift 2
+      ;;
+    --wine-source)
+      [[ $# -ge 2 ]] || die "--wine-source needs a path"
+      patched_wine_source="$2"
+      shift 2
+      ;;
+    --wine-branch)
+      [[ $# -ge 2 ]] || die "--wine-branch needs a branch name"
+      patched_wine_branch="$2"
+      shift 2
+      ;;
+    --wine-repo)
+      [[ $# -ge 2 ]] || die "--wine-repo needs a URL"
+      patched_wine_repo="$2"
       shift 2
       ;;
     --width)
@@ -107,6 +144,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-install-ableton)
       run_installer=0
+      shift
+      ;;
+    --skip-patched-wine)
+      build_patched_wine=0
       shift
       ;;
     --skip-niri)
@@ -144,6 +185,11 @@ case "$default_backend" in
   *) die "--backend must be rootful-xwayland, wayland, or xwayland" ;;
 esac
 
+case "$graphics_stack" in
+  d2d-opengl|dxvk|system) ;;
+  *) die "--graphics must be d2d-opengl, dxvk, or system" ;;
+esac
+
 if [[ -n "${LIVE_WINDOW_WIDTH:-}" && ! "${LIVE_WINDOW_WIDTH:-}" =~ ^[0-9]+$ ]]; then
   die "--width must be numeric"
 fi
@@ -151,6 +197,54 @@ fi
 if [[ -n "${LIVE_WINDOW_HEIGHT:-}" && ! "${LIVE_WINDOW_HEIGHT:-}" =~ ^[0-9]+$ ]]; then
   die "--height must be numeric"
 fi
+
+uses_patched_wine() {
+  [[ "$graphics_stack" == "d2d-opengl" && -n "$patched_wine_root" ]]
+}
+
+wine_path() {
+  if uses_patched_wine; then
+    printf '%s:%s\n' "$patched_wine_root/bin" "$PATH"
+  else
+    printf '%s\n' "$PATH"
+  fi
+}
+
+wine_binary() {
+  if uses_patched_wine && [[ -x "$patched_wine_root/bin/wine" ]]; then
+    printf '%s\n' "$patched_wine_root/bin/wine"
+    return 0
+  fi
+
+  command -v wine 2>/dev/null || return 1
+}
+
+winepath_binary() {
+  if uses_patched_wine && [[ -x "$patched_wine_root/bin/winepath" ]]; then
+    printf '%s\n' "$patched_wine_root/bin/winepath"
+    return 0
+  fi
+
+  command -v winepath 2>/dev/null || return 1
+}
+
+wineboot_binary() {
+  if uses_patched_wine && [[ -x "$patched_wine_root/bin/wineboot" ]]; then
+    printf '%s\n' "$patched_wine_root/bin/wineboot"
+    return 0
+  fi
+
+  command -v wineboot 2>/dev/null || return 1
+}
+
+wineserver_binary() {
+  if uses_patched_wine && [[ -x "$patched_wine_root/bin/wineserver" ]]; then
+    printf '%s\n' "$patched_wine_root/bin/wineserver"
+    return 0
+  fi
+
+  command -v wineserver 2>/dev/null || return 1
+}
 
 ableton_running() {
   pgrep -f '[A]bleton Live 12 .*\.exe' >/dev/null 2>&1
@@ -203,6 +297,24 @@ install_common_arch_deps() {
   fi
 
   local packages=(
+    base-devel
+    fontconfig
+    freetype2
+    git
+    glibc
+    gnutls
+    gst-plugins-base-libs
+    libglvnd
+    libpulse
+    libx11
+    libxext
+    libxi
+    libxrandr
+    libxrender
+    mesa
+    vulkan-headers
+    vulkan-icd-loader
+    vulkan-radeon
     wine-staging
     winetricks
     wineasio
@@ -223,6 +335,58 @@ install_common_arch_deps() {
   fi
 }
 
+install_patched_wine_if_requested() {
+  [[ "$graphics_stack" == "d2d-opengl" ]] || return 0
+  [[ "$build_patched_wine" -eq 1 ]] || {
+    warn "patched Wine build was skipped; expecting a compatible Wine at $patched_wine_root"
+    return 0
+  }
+
+  if [[ -x "$patched_wine_root/bin/wine" ]]; then
+    log "Patched Wine already exists at $patched_wine_root"
+    return 0
+  fi
+
+  local required=(git make)
+  local cmd
+  for cmd in "${required[@]}"; do
+    command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required to build patched Wine"
+  done
+  command -v gcc >/dev/null 2>&1 || command -v cc >/dev/null 2>&1 || die "a C compiler is required to build patched Wine"
+
+  log "Building patched Wine for Serum 2 D2D/DComp"
+  log "Repo: $patched_wine_repo"
+  log "Branch: $patched_wine_branch"
+  log "Source: $patched_wine_source"
+  log "Install root: $patched_wine_root"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    log "Would clone/update $patched_wine_repo branch $patched_wine_branch"
+    log "Would run: ./configure --prefix=$patched_wine_root --enable-win64"
+    log "Would run: make -j$(nproc 2>/dev/null || printf 4)"
+    log "Would run: make install"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$patched_wine_source")" "$(dirname "$patched_wine_root")"
+  if [[ -d "$patched_wine_source/.git" ]]; then
+    git -C "$patched_wine_source" fetch origin "$patched_wine_branch"
+    git -C "$patched_wine_source" checkout "$patched_wine_branch"
+    git -C "$patched_wine_source" pull --ff-only origin "$patched_wine_branch"
+  else
+    git clone --depth 1 --branch "$patched_wine_branch" "$patched_wine_repo" "$patched_wine_source"
+  fi
+
+  local jobs
+  jobs="$(nproc 2>/dev/null || printf 4)"
+  (
+    cd "$patched_wine_source"
+    ./configure --prefix="$patched_wine_root" --enable-win64
+    make -j"$jobs"
+    make install
+  )
+}
+
 create_wine_prefix_if_needed() {
   [[ "$create_prefix" -eq 1 ]] || return 0
 
@@ -230,7 +394,11 @@ create_wine_prefix_if_needed() {
     return 0
   fi
 
-  command -v wineboot >/dev/null 2>&1 || command -v wine >/dev/null 2>&1 || {
+  local wine_bin wineboot_bin wineserver_bin
+  wine_bin="$(wine_binary || true)"
+  wineboot_bin="$(wineboot_binary || true)"
+  wineserver_bin="$(wineserver_binary || true)"
+  [[ -n "$wine_bin" && -n "$wineboot_bin" ]] || {
     warn "Wine is not installed, so the prefix cannot be created yet"
     warn "Install Wine, then rerun this script"
     return 0
@@ -244,10 +412,12 @@ create_wine_prefix_if_needed() {
   log "Creating Wine prefix at $prefix"
   run mkdir -p "$prefix"
   if [[ "$dry_run" -eq 1 ]]; then
-    log "Would run: WINEPREFIX=$prefix WINEARCH=win64 wineboot -u"
+    log "Would run: WINEPREFIX=$prefix WINEARCH=win64 $wineboot_bin -u"
   else
-    WINEPREFIX="$prefix" WINEARCH=win64 wineboot -u
-    WINEPREFIX="$prefix" wineserver -w || true
+    env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wineboot_bin" -u
+    if [[ -n "$wineserver_bin" ]]; then
+      env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wineserver_bin" -w || true
+    fi
   fi
 }
 
@@ -260,7 +430,7 @@ register_wineasio_if_available() {
   if [[ "$dry_run" -eq 1 ]]; then
     log "Would run: WINEPREFIX=$prefix wineasio-register"
   else
-    WINEPREFIX="$prefix" WINEARCH=win64 wineasio-register || warn "wineasio-register failed; continuing"
+    env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" wineasio-register || warn "wineasio-register failed; continuing"
   fi
 }
 
@@ -272,7 +442,10 @@ run_ableton_installer_if_needed() {
     return 0
   fi
 
-  command -v wine >/dev/null 2>&1 || {
+  local wine_bin wineserver_bin
+  wine_bin="$(wine_binary || true)"
+  wineserver_bin="$(wineserver_binary || true)"
+  [[ -n "$wine_bin" ]] || {
     warn "Wine is not installed, so the Ableton installer cannot run"
     return 0
   }
@@ -297,10 +470,12 @@ run_ableton_installer_if_needed() {
   log "Running Ableton installer in the Wine prefix"
   log "Installer: $installer"
   if [[ "$dry_run" -eq 1 ]]; then
-    log "Would run: WINEPREFIX=$prefix wine $installer"
+    log "Would run: WINEPREFIX=$prefix $wine_bin $installer"
   else
-    WINEPREFIX="$prefix" WINEARCH=win64 wine "$installer"
-    WINEPREFIX="$prefix" wineserver -w || true
+    env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wine_bin" "$installer"
+    if [[ -n "$wineserver_bin" ]]; then
+      env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wineserver_bin" -w || true
+    fi
   fi
 }
 
@@ -348,12 +523,21 @@ write_launchers() {
 set -euo pipefail
 
 : "${ABLETON_WINEPREFIX:=__ABLETON_WINEPREFIX__}"
+: "${ABLETON_WINE_ROOT:=__ABLETON_WINE_ROOT__}"
+: "${ABLETON_GRAPHICS_STACK:=__ABLETON_GRAPHICS_STACK__}"
 : "${WINEARCH:=win64}"
 : "${WINEDEBUG:=-all}"
+
+if [[ -n "$ABLETON_WINE_ROOT" ]]; then
+  export PATH="$ABLETON_WINE_ROOT/bin:$PATH"
+fi
 
 export WINEPREFIX="$ABLETON_WINEPREFIX"
 export WINEARCH
 export WINEDEBUG
+
+wine_cmd="${WINE_BIN:-wine}"
+winepath_cmd="${WINEPATH_BIN:-winepath}"
 
 dxvk_log_dir="${DXVK_LOG_PATH:-$HOME/.cache/ableton-live12/dxvk}"
 mkdir -p "$dxvk_log_dir"
@@ -454,7 +638,7 @@ patch_ableton_geometry() {
   done
 }
 
-enable_gpu_renderer_option() {
+configure_live_graphics_options() {
   ableton_running && return 0
 
   local prefs_base="$WINEPREFIX/drive_c/users/$USER/AppData/Roaming/Ableton"
@@ -468,8 +652,48 @@ enable_gpu_renderer_option() {
     [[ -d "$pref_dir" ]] || continue
     options="$pref_dir/Options.txt"
     touch "$options"
-    grep -qxF -- '-_Feature.UseGpuRenderer' "$options" || printf '%s\n' '-_Feature.UseGpuRenderer' >>"$options"
+
+    if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
+      local tmp
+      tmp="$(mktemp)"
+      grep -vxF -- '-_Feature.UseGpuRenderer' "$options" >"$tmp" || true
+      mv "$tmp" "$options"
+    else
+      grep -qxF -- '-_Feature.UseGpuRenderer' "$options" || printf '%s\n' '-_Feature.UseGpuRenderer' >>"$options"
+    fi
   done
+}
+
+configure_serum2_prefs() {
+  ableton_running && return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local prefs="$WINEPREFIX/drive_c/users/$USER/AppData/Roaming/Xfer/Serum 2/Serum2Prefs.json"
+  [[ -f "$prefs" ]] || return 0
+
+  python3 - "$prefs" "$ABLETON_GRAPHICS_STACK" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+graphics = sys.argv[2]
+try:
+    data = json.loads(path.read_text())
+except Exception:
+    data = {}
+
+if graphics == "d2d-opengl":
+    data["Disable DirectComposition"] = False
+    data["Disable Partial Redraw"] = False
+else:
+    data["Disable DirectComposition"] = True
+    data["Disable Partial Redraw"] = True
+
+data["Default Overview Type Is 3D"] = False
+data.setdefault("Default Zoom", 100)
+path.write_text(json.dumps(data, indent=4, sort_keys=True) + "\n")
+PY
 }
 
 ensure_webview2_builtin_overrides() {
@@ -479,7 +703,7 @@ ensure_webview2_builtin_overrides() {
   local key='HKCU\Software\Wine\AppDefaults\msedgewebview2.exe\DllOverrides'
   local dll
   for dll in d3d11 dxgi d2d1; do
-    WINEDEBUG=-all wine reg add "$key" /v "$dll" /t REG_SZ /d builtin /f >/dev/null 2>&1 || true
+    WINEDEBUG=-all "$wine_cmd" reg add "$key" /v "$dll" /t REG_SZ /d builtin /f >/dev/null 2>&1 || true
   done
 }
 
@@ -513,8 +737,8 @@ find_ableton_exe_windows() {
     return 0
   }
 
-  if command -v winepath >/dev/null 2>&1; then
-    winepath -w "$exe" 2>/dev/null && return 0
+  if command -v "$winepath_cmd" >/dev/null 2>&1; then
+    "$winepath_cmd" -w "$exe" 2>/dev/null && return 0
   fi
 
   printf '%s\n' 'C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe'
@@ -523,7 +747,8 @@ find_ableton_exe_windows() {
 preflight_ableton() {
   ensure_webview2_builtin_overrides
   patch_ableton_geometry
-  enable_gpu_renderer_option
+  configure_live_graphics_options
+  configure_serum2_prefs
 }
 
 run_ableton() {
@@ -543,19 +768,30 @@ EOF
   fi
 
   if command -v pw-jack >/dev/null 2>&1; then
-    exec pw-jack wine "$exe" "$@"
+    exec pw-jack "$wine_cmd" "$exe" "$@"
   fi
 
-  exec wine "$exe" "$@"
+  exec "$wine_cmd" "$exe" "$@"
 }
 COMMON
 
-    python3 - "$common" "$prefix" <<'PY'
+    local launcher_wine_root="$patched_wine_root"
+    if [[ "$graphics_stack" != "d2d-opengl" ]]; then
+      launcher_wine_root=""
+    fi
+
+    python3 - "$common" "$prefix" "$launcher_wine_root" "$graphics_stack" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 prefix = sys.argv[2]
-path.write_text(path.read_text().replace("__ABLETON_WINEPREFIX__", prefix))
+wine_root = sys.argv[3]
+graphics = sys.argv[4]
+text = path.read_text()
+text = text.replace("__ABLETON_WINEPREFIX__", prefix)
+text = text.replace("__ABLETON_WINE_ROOT__", wine_root)
+text = text.replace("__ABLETON_GRAPHICS_STACK__", graphics)
+path.write_text(text)
 PY
     chmod +x "$common"
   fi
@@ -566,7 +802,12 @@ set -euo pipefail
 
 source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 
-export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
+if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
+  default_overrides="winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b"
+else
+  default_overrides="winemenubuilder.exe=d;winewayland.drv=d"
+fi
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$default_overrides}"
 
 find_free_display() {
   local n
@@ -631,10 +872,10 @@ export SDL_VIDEODRIVER=x11
 export CLUTTER_BACKEND=x11
 
 if command -v pw-jack >/dev/null 2>&1; then
-  exec pw-jack wine explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+  exec pw-jack "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
 fi
 
-exec wine explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+exec "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
 ROOTFUL_XWAYLAND
 
   write_file_from_template "$support_dir/live-wayland" "ableton-live12-linux" <<'WAYLAND'
@@ -761,7 +1002,9 @@ PY
 
 configure_wine_registry() {
   [[ "$configure_wine" -eq 1 ]] || return 0
-  command -v wine >/dev/null 2>&1 || {
+  local wine_bin
+  wine_bin="$(wine_binary || true)"
+  [[ -n "$wine_bin" ]] || {
     warn "wine not found; skipping Wine registry configuration"
     return 0
   }
@@ -775,14 +1018,33 @@ configure_wine_registry() {
     return 0
   fi
 
-  log "Configuring Wine registry for DXVK/high-DPI/rootful Xwayland"
+  log "Configuring Wine registry for $graphics_stack/rootful Xwayland"
 
-  local reg=(env WINEPREFIX="$prefix" WINEARCH=win64 wine reg add)
-  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d8' /t REG_SZ /d native /f >/dev/null
-  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d9' /t REG_SZ /d native /f >/dev/null
-  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d10core' /t REG_SZ /d native /f >/dev/null
-  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d11' /t REG_SZ /d native /f >/dev/null
-  run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dxgi' /t REG_SZ /d native /f >/dev/null
+  local reg=(env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wine_bin" reg add)
+  local reg_delete=(env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wine_bin" reg delete)
+  if [[ "$graphics_stack" == "d2d-opengl" ]]; then
+    run "${reg[@]}" 'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d opengl /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d8' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d9' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d10core' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d11' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dxgi' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d2d1' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dcomp' /t REG_SZ /d builtin /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dwrite' /t REG_SZ /d builtin /f >/dev/null
+  elif [[ "$graphics_stack" == "dxvk" ]]; then
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d8' /t REG_SZ /d native /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d9' /t REG_SZ /d native /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d10core' /t REG_SZ /d native /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*d3d11' /t REG_SZ /d native /f >/dev/null
+    run "${reg[@]}" 'HKCU\Software\Wine\DllOverrides' /v '*dxgi' /t REG_SZ /d native /f >/dev/null
+    if [[ "$dry_run" -eq 1 ]]; then
+      log "Would delete HKCU\\Software\\Wine\\Direct3D renderer"
+    else
+      "${reg_delete[@]}" 'HKCU\Software\Wine\Direct3D' /v renderer /f >/dev/null 2>&1 || true
+    fi
+  fi
+
   run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v Decorated /t REG_SZ /d N /f >/dev/null
   run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v Managed /t REG_SZ /d Y /f >/dev/null
   run "${reg[@]}" 'HKCU\Software\Wine\X11 Driver' /v UseTakeFocus /t REG_SZ /d N /f >/dev/null
@@ -799,6 +1061,7 @@ configure_wine_registry() {
 
 install_dxvk_if_requested() {
   [[ "$configure_dxvk" -eq 1 ]] || return 0
+  [[ "$graphics_stack" == "dxvk" ]] || return 0
   command -v winetricks >/dev/null 2>&1 || {
     warn "DXVK setup requested, but winetricks is not installed"
     return 0
@@ -816,7 +1079,7 @@ install_dxvk_if_requested() {
   if [[ "$dry_run" -eq 1 ]]; then
     log "Would run: WINEPREFIX=$prefix winetricks -q dxvk"
   else
-    WINEPREFIX="$prefix" WINEARCH=win64 winetricks -q dxvk || warn "winetricks dxvk failed; launchers were still installed"
+    env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" winetricks -q dxvk || warn "winetricks dxvk failed; launchers were still installed"
   fi
 }
 
@@ -834,6 +1097,12 @@ Commands:
 Prefix:
   $prefix
 
+Graphics stack:
+  $graphics_stack
+
+Patched Wine root:
+  $patched_wine_root
+
 If the command is not found, add this to your shell PATH:
   $bin_dir
 
@@ -844,6 +1113,7 @@ EOF
 }
 
 install_common_arch_deps
+install_patched_wine_if_requested
 create_wine_prefix_if_needed
 configure_wine_registry
 install_dxvk_if_requested

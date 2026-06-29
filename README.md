@@ -1,12 +1,14 @@
 # Ableton Live 12 on Linux, Wine, Wayland, and niri
 
-One-command setup for running a licensed Ableton Live 12 install under Wine on Linux. This repo captures the setup that made Ableton Live 12.4.2 Suite usable on niri at the end of June 2026.
+One-command setup for running a licensed Ableton Live 12 install under Wine on Linux. This repo captures the setup that made Ableton Live 12.4.2 Suite usable on niri at the end of June 2026, including Serum 2.
 
-The recommended path is a rootful Xwayland display sized exactly to the current output, with Ableton running in a Wine virtual desktop inside it. That avoided the problems seen with the other backends:
+The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and a rootful Xwayland display sized exactly to the current output, with Ableton running in a Wine virtual desktop inside it. That avoided the problems seen with the other backends:
 
 - native Wine Wayland: right-click menus opened in place, but the pointer could not enter the popup reliably;
 - rootless Xwayland/xwayland-satellite: the main UI could work, but menus appeared as centered floating windows;
-- forced fullscreen niri rules: broke geometry/origin and could produce blue/black startup screens.
+- forced fullscreen niri rules: broke geometry/origin and could produce blue/black startup screens;
+- DXVK: worked well for Ableton itself, but Serum 2 graphics could turn blue/black or partially redraw incorrectly;
+- patched WineD3D/Vulkan: hit a `wined3d.dll` assertion during Live startup on the tested RADV system.
 
 This repo does not provide Ableton Live, activation, serials, cracks, or downloads. You need your own licensed Ableton Live 12 installer/account.
 
@@ -30,6 +32,12 @@ Then launch:
 
 ```bash
 live
+```
+
+The default graphics stack is `d2d-opengl`. It builds a patched Wine branch under `~/.local/opt/wine-d2d1-11.11` if it is not already present. If you want the older DXVK path instead:
+
+```bash
+./install.sh --graphics dxvk --install-arch-deps --no-install-ableton
 ```
 
 Fallback launchers:
@@ -93,12 +101,15 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 
 ## What The Script Configures
 
+- Builds giang17's `d2d1-dcomp-11.11` Wine branch when using the default `d2d-opengl` graphics stack.
 - Creates a `win64` Wine prefix when needed.
 - Optionally runs a local licensed Ableton Live 12 installer.
-- Installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
-- Enables Ableton's GPU renderer flag in `Options.txt`.
+- For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
+- For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
+- Disables Ableton's GPU renderer flag in `Options.txt` for the default stack; enables it for the DXVK fallback.
+- Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
-- Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`, while keeping DXVK native for Ableton itself.
+- Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
 - Adds WebView2 browser flags to disable GPU/direct-composition paths that crash under Wine+DXVK.
 - Adds a niri rule for the rootful Xwayland window.
 
@@ -142,10 +153,16 @@ Preferences.cfg.before-launch-geometry-autofix
 --prefix PATH          Wine prefix. Default: ~/myWinePrefixes/abletonLive12
 --installer PATH       Run a local Ableton Live 12 installer in the prefix
 --backend NAME         Default "live" backend: rootful-xwayland, wayland, or xwayland
+--graphics NAME        d2d-opengl, dxvk, or system. Default: d2d-opengl
+--wine-root PATH       Patched Wine install root
+--wine-source PATH     Patched Wine source checkout
+--wine-branch NAME     Patched Wine branch. Default: d2d1-dcomp-11.11
+--wine-repo URL        Patched Wine repo
 --width PX             Override launch-time geometry width
 --height PX            Override launch-time geometry height
 --no-create-prefix     Do not create the Wine prefix
 --no-install-ableton   Do not run or auto-detect a local Ableton installer
+--skip-patched-wine    Do not clone/build patched Wine
 --skip-niri            Do not install the niri rule
 --skip-wine-config     Do not write Wine registry settings
 --skip-dxvk            Do not run winetricks dxvk
@@ -158,22 +175,24 @@ Preferences.cfg.before-launch-geometry-autofix
 Verified on June 29, 2026:
 
 - Ableton Live 12.4.2 Suite
-- Wine staging 11.11
+- patched Wine 11.11 from `d2d1-dcomp-11.11`
 - niri 26.04
 - Xwayland rootful display at `2560x1440+0+0`
 - AMD Radeon RX 7900 GRE with RADV
-- DXVK enabled for Ableton
+- WineD3D OpenGL renderer for Ableton and Serum 2
 - WebView2 forced away from DXVK per app
 - WineASIO/PipeWire playback available
+- Serum 2 VST3 installed and visually usable
 
 Observed checks:
 
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log reported `GPU Renderer: OnAlways`.
-- niri reported the Xwayland window floating at `2560x1440`, position `0,0`.
-- DXVK reported Ableton's main client buffer as `2552x1387`, matching the Wine virtual desktop client area without compositor scaling.
+- Ableton log reported `GPU Renderer: Off (Platform default)`.
+- Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
+- niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.
-- WebView2 stayed running without creating `msedgewebview2_d3d11.log` after applying the per-app builtin overrides.
+- Serum 2 no longer showed the blue/blank UI seen under DXVK.
+- Patched WineD3D/Vulkan was rejected after `wined3d.dll` asserted at `dlls/wined3d/cs.c:3261`, expression `flags & WINED3D_MAP_NOOVERWRITE`.
 
 ## License
 

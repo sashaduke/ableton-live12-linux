@@ -5,12 +5,13 @@ These notes capture the path that worked for Ableton Live 12.4.2 Suite on niri o
 ## Machine
 
 - Ableton Live 12.4.2 Suite
-- Wine staging 11.11
+- patched Wine 11.11, branch `d2d1-dcomp-11.11`
 - niri 26.04
 - AMD Radeon RX 7900 GRE, RADV
 - `2560x1440` output at scale `1.0`
 - Wine prefix: `~/myWinePrefixes/abletonLive12`
 - Ableton executable: `C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe`
+- Serum 2 VST3 installed under the prefix's common VST3 directory
 
 ## Failed Or Partial Backends
 
@@ -36,17 +37,46 @@ Rootful Xwayland tiled by niri:
 - Menu behavior was correct.
 - The outer niri tile was smaller than the inner Xwayland screen, causing blur and click offsets.
 
+DXVK:
+
+- Ableton's main UI and playback worked well.
+- Serum 2 could show blue/blank or partially-redrawn plugin graphics.
+- Setting `"Disable DirectComposition": true` and `"Disable Partial Redraw": true` helped DXVK, but fidelity was still worse than the patched D2D/DComp path.
+
+Patched WineD3D/Vulkan:
+
+- Live reached D3D device creation.
+- Startup then hit a Visual C++ assertion in `wined3d.dll`.
+- The assertion was `dlls/wined3d/cs.c:3261`, expression `flags & WINED3D_MAP_NOOVERWRITE`.
+
 ## Final Backend
 
-The working backend is rootful Xwayland plus a Wine virtual desktop:
+The working backend is rootful Xwayland plus a Wine virtual desktop, using patched Wine builtin D3D/DXGI/D2D/DComp with WineD3D's OpenGL renderer:
 
 ```bash
+WINEPREFIX="$HOME/myWinePrefixes/abletonLive12" \
+  "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" reg add \
+  'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d opengl /f
+
 Xwayland :20 -ac -terminate -geometry 2560x1440 -br -decorate
-DISPLAY=:20 wine explorer /desktop=AbletonLive12,2560x1440 \
+DISPLAY=:20 WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b' \
+  "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" explorer /desktop=AbletonLive12,2560x1440 \
   "C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe"
 ```
 
 The installer generalizes the display number and geometry.
+
+For this stack, Ableton's `Options.txt` should not contain `-_Feature.UseGpuRenderer`.
+
+Serum 2 prefs should contain:
+
+```json
+{
+    "Disable DirectComposition": false,
+    "Disable Partial Redraw": false,
+    "Default Overview Type Is 3D": false
+}
+```
 
 ## Required niri Behavior
 
@@ -72,7 +102,7 @@ Ableton starts WebView2. With global DXVK overrides, WebView2 can load DXVK and 
 DxgiFactory::CreateSwapChainForComposition: Not implemented
 ```
 
-The working fix keeps DXVK for Ableton but forces WebView2 to Wine builtin DLLs:
+The working fix forces WebView2 to Wine builtin DLLs:
 
 ```bash
 wine reg add 'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe\DllOverrides' /v d3d11 /t REG_SZ /d builtin /f
@@ -94,8 +124,7 @@ A good launch had these properties:
 - Nested `xrandr` reported `XWAYLAND0 connected 2560x1440+0+0`.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log reported `GPU Renderer: OnAlways`.
-- DXVK reported the main Ableton buffer as `2552x1387`, the client area inside the Wine desktop decorations.
+- Ableton log reported `GPU Renderer: Off (Platform default)`.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
-- No `msedgewebview2_d3d11.log` was created after applying WebView2 app-default overrides.
+- Serum 2 opened with usable graphics instead of a blue/blank surface.
