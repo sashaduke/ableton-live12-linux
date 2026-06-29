@@ -702,8 +702,12 @@ configure_live_graphics_options() {
     options="$pref_dir/Options.txt"
     touch "$options"
 
+    local tmp
+    tmp="$(mktemp)"
+    grep -vxF -- '-_ForceOpenGlBackend' "$options" >"$tmp" || true
+    mv "$tmp" "$options"
+
     if [[ "$ABLETON_LIVE_GPU_RENDERER" == "0" || "$ABLETON_LIVE_GPU_RENDERER" == "false" ]]; then
-      local tmp
       tmp="$(mktemp)"
       grep -vxF -- '-_Feature.UseGpuRenderer' "$options" >"$tmp" || true
       mv "$tmp" "$options"

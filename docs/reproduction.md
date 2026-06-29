@@ -67,7 +67,7 @@ DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x0' \
 
 The installer generalizes the display number, geometry, and refresh rate. On the tested Acer XB271HU, niri reported the physical output at `2560x1440@165`; plain rootful Xwayland otherwise advertised a 60 Hz mode to Windows applications.
 
-For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer`. The Vulkan renderer asserted with that path, but the OpenGL renderer starts cleanly, and Live's host UI can leave stale redraw regions when the GPU renderer is off.
+For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer` and should not contain `-_ForceOpenGlBackend`. The Vulkan renderer asserted with this Wine path, and forcing Live's own OpenGL backend made Serum 2 editor redraw corruption spread into Ableton's host UI.
 
 The launcher should also set `WINE_D3D_CONFIG=csmt=0x0`. Without that, Ableton's host UI can leave tracers or wait for another click/key event before repainting.
 

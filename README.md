@@ -159,6 +159,8 @@ Preferences.cfg.before-launch-geometry-autofix
 
 If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep Live's GPU renderer enabled and disable WineD3D's multithreaded command stream. The launcher now does both by default: it writes `-_Feature.UseGpuRenderer` and sets `WINE_D3D_CONFIG=csmt=0x0`.
 
+Do not keep `-_ForceOpenGlBackend` in Ableton's `Options.txt`. It can reduce one class of Live repaint issue, but in testing it made Serum 2 editor redraw corruption spread into Ableton's host UI. The launcher removes that flag before startup.
+
 If Live's GPU renderer regresses on your machine:
 
 ```bash
