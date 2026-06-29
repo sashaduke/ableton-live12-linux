@@ -109,7 +109,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
-- Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
+- Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition but disables Serum partial redraw for more reliable editor repainting; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
 - Adds WebView2 browser flags to disable GPU/direct-composition paths that crash under Wine+DXVK.
@@ -172,6 +172,8 @@ WINE_D3D_CONFIG=csmt=0x1 live
 ```
 
 That may improve performance, but can bring back async repaint artifacts on Ableton's host UI.
+
+For Serum 2 editor hangs, blank regions, or stale regions, keep the default full-redraw Serum setting. The launcher writes `"Disable Partial Redraw": true` before startup when Serum's prefs file already exists.
 
 ## Options
 
