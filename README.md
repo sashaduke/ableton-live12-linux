@@ -106,7 +106,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
-- Disables Ableton's GPU renderer flag in `Options.txt` for the default stack; enables it for the DXVK fallback.
+- Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
@@ -146,6 +146,24 @@ The first time it patches a preferences file, it writes:
 ```text
 Preferences.cfg.before-launch-geometry-autofix
 ```
+
+## Stale Redraw Mitigations
+
+If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep Live's GPU renderer enabled. The launcher now writes `-_Feature.UseGpuRenderer` by default.
+
+If that regresses on your machine:
+
+```bash
+ABLETON_LIVE_GPU_RENDERER=0 live
+```
+
+If stale redraws persist with the GPU renderer enabled, try WineD3D without its multithreaded command stream:
+
+```bash
+WINE_D3D_CONFIG=csmt=0x0 live
+```
+
+That can reduce async repaint artifacts, but may cost UI/GPU performance.
 
 ## Options
 
@@ -187,7 +205,7 @@ Verified on June 29, 2026:
 Observed checks:
 
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log reported `GPU Renderer: Off (Platform default)`.
+- Ableton log reported clean startup with the patched WineD3D/OpenGL stack. If the host UI leaves stale redraw regions, enable `-_Feature.UseGpuRenderer` in `Options.txt`; this repo now does that by default.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.

@@ -66,7 +66,7 @@ DISPLAY=:20 WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi
 
 The installer generalizes the display number and geometry.
 
-For this stack, Ableton's `Options.txt` should not contain `-_Feature.UseGpuRenderer`.
+For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer`. The Vulkan renderer asserted with that path, but the OpenGL renderer starts cleanly, and Live's host UI can leave stale redraw regions when the GPU renderer is off.
 
 Serum 2 prefs should contain:
 
@@ -124,7 +124,7 @@ A good launch had these properties:
 - Nested `xrandr` reported `XWAYLAND0 connected 2560x1440+0+0`.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log reported `GPU Renderer: Off (Platform default)`.
+- Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer; this is preferred for avoiding stale Ableton UI redraws under WineD3D/OpenGL.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.

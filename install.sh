@@ -525,6 +525,7 @@ set -euo pipefail
 : "${ABLETON_WINEPREFIX:=__ABLETON_WINEPREFIX__}"
 : "${ABLETON_WINE_ROOT:=__ABLETON_WINE_ROOT__}"
 : "${ABLETON_GRAPHICS_STACK:=__ABLETON_GRAPHICS_STACK__}"
+: "${ABLETON_LIVE_GPU_RENDERER:=1}"
 : "${WINEARCH:=win64}"
 : "${WINEDEBUG:=-all}"
 
@@ -653,7 +654,7 @@ configure_live_graphics_options() {
     options="$pref_dir/Options.txt"
     touch "$options"
 
-    if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
+    if [[ "$ABLETON_LIVE_GPU_RENDERER" == "0" || "$ABLETON_LIVE_GPU_RENDERER" == "false" ]]; then
       local tmp
       tmp="$(mktemp)"
       grep -vxF -- '-_Feature.UseGpuRenderer' "$options" >"$tmp" || true
