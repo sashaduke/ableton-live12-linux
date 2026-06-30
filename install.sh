@@ -7,7 +7,7 @@ prefix="${ABLETON_WINEPREFIX:-$default_prefix}"
 bin_dir="${BIN_DIR:-$HOME/.local/bin}"
 support_dir="${XDG_DATA_HOME:-$HOME/.local/share}/ableton-live12-linux"
 niri_config="${NIRI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl}"
-default_backend="rootful-xwayland"
+default_backend="xwayland"
 graphics_stack="${ABLETON_GRAPHICS_STACK:-d2d-opengl}"
 patched_wine_repo="${ABLETON_PATCHED_WINE_REPO:-https://github.com/giang17/wine.git}"
 patched_wine_branch="${ABLETON_PATCHED_WINE_BRANCH:-d2d1-dcomp-11.11}"
@@ -33,7 +33,7 @@ Usage:
 Options:
   --prefix PATH          Wine prefix. Default: ~/myWinePrefixes/abletonLive12
   --installer PATH       Run a local Ableton Live 12 installer in the prefix
-  --backend NAME         Default "live" backend: rootful-xwayland, wayland, or xwayland
+  --backend NAME         Default "live" backend: xwayland, rootful-xwayland, or wayland
   --graphics NAME        d2d-opengl, dxvk, or system. Default: d2d-opengl
   --wine-root PATH       Patched Wine install root. Default: ~/.local/opt/wine-d2d1-11.11
   --wine-source PATH     Patched Wine source checkout. Default: ~/src/wine-d2d1
@@ -45,7 +45,7 @@ Options:
   --no-create-prefix     Do not create the Wine prefix when it is missing
   --no-install-ableton   Do not run or auto-detect a local Ableton installer
   --skip-patched-wine    Do not clone/build the patched Wine tree
-  --skip-niri            Do not install the niri main-window rule
+  --skip-niri            Do not install the niri Ableton/Xwayland window rules
   --skip-wine-config     Do not write Wine registry settings
   --skip-dxvk            Do not run "winetricks -q dxvk"
   --install-arch-deps    Install common Arch packages with pacman/paru
@@ -53,11 +53,11 @@ Options:
   -h, --help             Show this help
 
 After install:
-  live                    Rootful Xwayland launcher, recommended for niri
+  live                    Rootless Xwayland + Wine virtual desktop launcher, recommended for niri
   live-preflight          Apply safe stopped-app prefix fixes without launching Live
-  live-rootful-xwayland   Same as the default when --backend rootful-xwayland is used
+  live-rootful-xwayland   Rootful Xwayland fallback launcher
   live-wayland            Native Wine Wayland fallback
-  live-xwayland           Rootless/Xwayland-satellite fallback
+  live-xwayland           Rootless Xwayland + Wine virtual desktop launcher
 
 This script does not download, crack, activate, or distribute Ableton Live.
 It can run a local licensed Ableton Live 12 installer if you provide one.
@@ -1069,13 +1069,33 @@ source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
 
 unset WAYLAND_DISPLAY
-export DISPLAY="${DISPLAY:-:1}"
+export DISPLAY="${LIVE_XWAYLAND_DISPLAY:-:1}"
 export GDK_BACKEND=x11
 export QT_QPA_PLATFORM=xcb
 export SDL_VIDEODRIVER=x11
 export CLUTTER_BACKEND=x11
 
-run_ableton "$@"
+preflight_ableton
+
+exe="$(find_ableton_exe)"
+if [[ ! -f "$exe" ]]; then
+  cat >&2 <<EOF
+Ableton Live executable was not found:
+  $exe
+
+Set ABLETON_EXE to the .exe path, or install Ableton Live 12 into:
+  $WINEPREFIX
+EOF
+  exit 1
+fi
+exe_windows="$(find_ableton_exe_windows)"
+read -r width height < <(detect_target_geometry)
+
+if command -v pw-jack >/dev/null 2>&1; then
+  exec_with_realtime "$LIVE_RT_PRIORITY" pw-jack "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+fi
+
+exec_with_realtime "$LIVE_RT_PRIORITY" "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
 XWAYLAND
 
   write_file_from_template "$support_dir/live-preflight" "ableton-live12-linux" <<'PREFLIGHT'
@@ -1132,7 +1152,7 @@ install_niri_rule() {
     return 0
   }
 
-  log "Installing niri rootful-Xwayland rule"
+  log "Installing niri Ableton/Xwayland window rules"
 
   if [[ "$dry_run" -eq 1 ]]; then
     log "Would patch $niri_config"
@@ -1152,6 +1172,13 @@ text = path.read_text()
 begin = "// BEGIN ableton-live12-linux"
 end = "// END ableton-live12-linux"
 block = """// BEGIN ableton-live12-linux
+window-rule {
+    match app-id=r#"(?i)^(explorer\\.exe|ableton live 12 suite\\.exe)$"# title=r#"(?i)^(AbletonLive12|.*Ableton Live 12 Suite.*)$"#
+    open-floating true
+    draw-border-with-background false
+    geometry-corner-radius 0
+    clip-to-geometry false
+}
 window-rule {
     match app-id="org.freedesktop.Xwayland" title=r#"^Xwayland on :[0-9]+$"#
     open-floating true
@@ -1202,7 +1229,7 @@ configure_wine_registry() {
     return 0
   fi
 
-  log "Configuring Wine registry for $graphics_stack/rootful Xwayland"
+  log "Configuring Wine registry for $graphics_stack"
 
   local reg=(env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wine_bin" reg add)
   local reg_delete=(env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" "$wine_bin" reg delete)
@@ -1275,9 +1302,9 @@ Installed Ableton Live 12 Linux launchers.
 Commands:
   live                    Default launcher ($default_backend)
   live-preflight          Apply safe stopped-app prefix fixes without launching Live
-  live-rootful-xwayland   Rootful Xwayland launcher, recommended under niri
+  live-rootful-xwayland   Rootful Xwayland fallback launcher
   live-wayland            Native Wine Wayland fallback
-  live-xwayland           Rootless/Xwayland-satellite fallback
+  live-xwayland           Rootless Xwayland + Wine virtual desktop launcher
 
 Prefix:
   $prefix

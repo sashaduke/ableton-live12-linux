@@ -2,10 +2,10 @@
 
 One-command setup for running a licensed Ableton Live 12 install under Wine on Linux. This repo captures the setup that made Ableton Live 12.4.2 Suite usable on niri at the end of June 2026, including Serum 2.
 
-The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and a rootful Xwayland display sized exactly to the current output, with Ableton running in a Wine virtual desktop inside it. That avoided the problems seen with the other backends:
+The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and the compositor's normal rootless Xwayland display at the real output refresh rate, with Ableton running in a Wine virtual desktop inside it. This avoids rootful Xwayland's fake 60 Hz RandR mode list while keeping Ableton menus inside the Wine desktop.
 
 - native Wine Wayland: right-click menus opened in place, but the pointer could not enter the popup reliably;
-- rootless Xwayland/xwayland-satellite: the main UI could work, but menus appeared as centered floating windows;
+- direct rootless Xwayland/xwayland-satellite: the main UI could work, but menus appeared as centered floating windows;
 - forced fullscreen niri rules: broke geometry/origin and could produce blue/black startup screens;
 - DXVK: worked well for Ableton itself, but Serum 2 graphics could turn blue/black or partially redraw incorrectly;
 - patched WineD3D/Vulkan: hit a `wined3d.dll` assertion during Live startup on the tested RADV system.
@@ -21,7 +21,7 @@ This is the setup that was working cleanly on June 30, 2026:
 - Ableton Live 12.4.2 Suite
 - Serum 2.1.4 VST3
 - niri 26.04 on Wayland
-- rootful Xwayland, floating and output-sized
+- rootless Xwayland at the real output refresh, with a Wine virtual desktop
 - `2560x1440` output at scale `1`, tested at `165 Hz`
 - patched Wine 11.11 from `d2d1-dcomp-11.11`
 - WineD3D OpenGL renderer, not DXVK
@@ -30,7 +30,7 @@ This is the setup that was working cleanly on June 30, 2026:
 - Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
 - Ableton `Options.txt` contains `-DontCombineAPCs`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
-- Xwayland and Wine launch through `chrt -r` when realtime scheduling is permitted
+- Wine launches through `chrt -r` when realtime scheduling is permitted; the rootful Xwayland fallback also launches Xwayland through `chrt -r`
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
 
 The important negative result is `-_ForceOpenGlBackend`: it made one Ableton repaint issue look better, but caused Serum 2 editor redraw corruption to spread into Ableton's host UI. The launcher now removes that flag before startup.
@@ -73,9 +73,9 @@ Fallback launchers:
 
 ```bash
 live-preflight
-live-rootful-xwayland
 live-wayland
 live-xwayland
+live-rootful-xwayland
 ```
 
 ## One-Command Remote Install
@@ -109,7 +109,7 @@ The installer writes:
 - `~/.local/share/ableton-live12-linux/live-wayland`
 - `~/.local/share/ableton-live12-linux/live-xwayland`
 
-By default, `live` points to `live-rootful-xwayland`.
+By default, `live` points to `live-xwayland`.
 
 ## Default Prefix
 
@@ -138,17 +138,17 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x1` as the current redraw-stability test. Override with `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` if CSMT brings back stale regions.
-- Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
+- Uses the compositor's normal Xwayland display by default because it exposes the tested monitor as `2560x1440@164.90`. The rootful Xwayland fallback still exposed only about 60 Hz to X11 clients even when launched with `-fakescreenfps 165`.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. Disabling it made the constant redraw issue worse in testing; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if you need to retest the CPU UI path.
 - Adds Ableton's `-DontCombineAPCs` option. Wine-NSPA's Ableton Live notes report this reducing Live-specific CPU/thread overhead.
-- Starts rootful Xwayland and Wine through `chrt -r` when realtime scheduling is available. Set `LIVE_RT_PRIORITY=0` to disable this.
+- Starts Wine through `chrt -r` when realtime scheduling is available. The rootful Xwayland fallback also starts Xwayland through `chrt -r`. Set `LIVE_RT_PRIORITY=0` to disable this.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
 - Sets default Windows theme registry values that Ableton probes during UI startup.
 - Adds WebView2 browser flags to disable GPU/direct-composition paths that crash under Wine+DXVK.
-- Adds a niri rule for the rootful Xwayland window.
+- Adds niri rules for the rootless Wine desktop window and the rootful Xwayland fallback.
 
 The `live` launchers run the stopped-app-safe prefix checks before startup.
 `live-preflight` runs the same checks without launching Ableton and refuses to
@@ -160,6 +160,13 @@ The installer inserts a managed block before `binds` in `~/.config/niri/config.k
 
 ```kdl
 // BEGIN ableton-live12-linux
+window-rule {
+    match app-id=r#"(?i)^(explorer\.exe|ableton live 12 suite\.exe)$"# title=r#"(?i)^(AbletonLive12|.*Ableton Live 12 Suite.*)$"#
+    open-floating true
+    draw-border-with-background false
+    geometry-corner-radius 0
+    clip-to-geometry false
+}
 window-rule {
     match app-id="org.freedesktop.Xwayland" title=r#"^Xwayland on :[0-9]+$"#
     open-floating true
@@ -182,7 +189,7 @@ The launcher detects the focused niri output size and patches the saved Ableton 
 LIVE_WINDOW_WIDTH=1920 LIVE_WINDOW_HEIGHT=1080 live
 ```
 
-Override rootful Xwayland's fake-screen refresh rate:
+Override rootful Xwayland fallback's fake-screen refresh rate:
 
 ```bash
 LIVE_REFRESH_RATE=165 live
@@ -190,8 +197,9 @@ LIVE_REFRESH_RATE=165 live
 
 Rootful Xwayland may still expose 60 Hz RandR modes even when launched with
 `-fakescreenfps 165`. On the tested 165 Hz display, custom `xrandr` modelines
-could be applied briefly but were not durable. If you want to test Mesa's
-vblank behavior explicitly:
+could be applied briefly but were not durable. The default `live-xwayland`
+backend uses niri's normal Xwayland display, which exposes `2560x1440@164.90`.
+If you want to test Mesa's vblank behavior explicitly:
 
 ```bash
 LIVE_VBLANK_MODE=0 live
@@ -287,7 +295,7 @@ not a stable text format.
 ```text
 --prefix PATH          Wine prefix. Default: ~/myWinePrefixes/abletonLive12
 --installer PATH       Run a local Ableton Live 12 installer in the prefix
---backend NAME         Default "live" backend: rootful-xwayland, wayland, or xwayland
+--backend NAME         Default "live" backend: xwayland, rootful-xwayland, or wayland
 --graphics NAME        d2d-opengl, dxvk, or system. Default: d2d-opengl
 --wine-root PATH       Patched Wine install root
 --wine-source PATH     Patched Wine source checkout
@@ -299,7 +307,7 @@ not a stable text format.
 --no-create-prefix     Do not create the Wine prefix
 --no-install-ableton   Do not run or auto-detect a local Ableton installer
 --skip-patched-wine    Do not clone/build patched Wine
---skip-niri            Do not install the niri rule
+--skip-niri            Do not install the niri Ableton/Xwayland window rules
 --skip-wine-config     Do not write Wine registry settings
 --skip-dxvk            Do not run winetricks dxvk
 --install-arch-deps    Install common Arch packages
@@ -314,8 +322,8 @@ Verified on June 30, 2026:
 - Serum 2.1.4 VST3
 - patched Wine 11.11 from `d2d1-dcomp-11.11`
 - niri 26.04
-- Xwayland rootful display at `2560x1440+0+0`
-- Xwayland launched with `-fakescreenfps 165` on the tested 165 Hz output
+- niri's normal Xwayland display exposing `2560x1440@164.90`
+- Wine virtual desktop at `2560x1440`
 - AMD Radeon RX 7900 GRE with RADV
 - WineD3D OpenGL renderer for Ableton and Serum 2
 - WebView2 forced away from DXVK per app

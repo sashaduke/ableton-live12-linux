@@ -22,7 +22,7 @@ Native Wine Wayland:
 - Menus opened at the correct location.
 - Pointer movement into popup menus failed, making menus unusable.
 
-Rootless Xwayland/xwayland-satellite:
+Direct rootless Xwayland/xwayland-satellite:
 
 - Main UI could launch.
 - Some flicker issues were avoided after disabling native Wayland.
@@ -37,6 +37,8 @@ Rootful Xwayland tiled by niri:
 
 - Menu behavior was correct.
 - The outer niri tile was smaller than the inner Xwayland screen, causing blur and click offsets.
+- Even when launched with `-fakescreenfps 165`, rootful Xwayland exposed only about 60 Hz RandR modes on the tested machine.
+- Ableton logged `UiFramework: Compositor timer engaged with nan Hz` on this path while the host UI still showed stale redraws.
 
 Live forced OpenGL backend:
 
@@ -56,23 +58,22 @@ Patched WineD3D/Vulkan:
 - Startup then hit a Visual C++ assertion in `wined3d.dll`.
 - The assertion was `dlls/wined3d/cs.c:3261`, expression `flags & WINED3D_MAP_NOOVERWRITE`.
 
-## Final Backend
+## Current Backend
 
-The working backend is rootful Xwayland plus a Wine virtual desktop, using patched Wine builtin D3D/DXGI/D2D/DComp with WineD3D's OpenGL renderer:
+The current best backend is niri's normal rootless Xwayland display plus a Wine virtual desktop, using patched Wine builtin D3D/DXGI/D2D/DComp with WineD3D's OpenGL renderer:
 
 ```bash
 WINEPREFIX="$HOME/myWinePrefixes/abletonLive12" \
   "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" reg add \
   'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d opengl /f
 
-Xwayland :20 -ac -terminate -geometry 2560x1440 -fakescreenfps 165 -br -decorate
-DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x1' \
+DISPLAY=:1 WINE_D3D_CONFIG='csmt=0x1' \
   WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b' \
   "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" explorer /desktop=AbletonLive12,2560x1440 \
   "C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe"
 ```
 
-The installer generalizes the display number, geometry, and refresh rate. On the tested Acer XB271HU, niri reported the physical output at `2560x1440@165`; rootful Xwayland still exposed 60 Hz RandR modes to X11/Windows applications even with `-fakescreenfps 165`. Custom `xrandr` 165 Hz modelines were not durable.
+The key change from the earlier rootful Xwayland path is using the compositor's normal Xwayland display. On the tested Acer XB271HU, niri's normal Xwayland display exposed the physical output as `2560x1440@164.90`; rootful Xwayland still exposed about 60 Hz RandR modes to X11/Windows applications even with `-fakescreenfps 165`. Custom `xrandr` 165 Hz modelines on the rootful fallback were not durable.
 
 For this stack, Ableton's `Options.txt` should not contain `-_ForceOpenGlBackend`. The Vulkan renderer asserted with this Wine path, and forcing Live's own OpenGL backend made Serum 2 editor redraw corruption spread into Ableton's host UI.
 
@@ -85,8 +86,9 @@ the older CSMT-off path.
 Ableton's `-DontCombineAPCs` option is enabled because both Ableton's
 `Options.txt` documentation and Wine-NSPA's Ableton Live 11/12 notes identify it
 as relevant to Live's CPU/thread behavior under Wine. The launcher also uses
-`chrt -r` for Wine and rootful Xwayland when realtime scheduling is available,
-matching Wine-NSPA's recommendation to reduce lock contention.
+`chrt -r` for Wine when realtime scheduling is available. The rootful Xwayland
+fallback also starts Xwayland under `chrt -r`, matching Wine-NSPA's
+recommendation to reduce lock contention.
 
 WineASIO can be registered and visible while Ableton still chooses `MME/DirectX`.
 When that happens, Ableton logs high buffers such as `8192/4096` samples and
@@ -105,9 +107,16 @@ Serum 2 prefs should contain:
 
 ## Required niri Behavior
 
-The rootful Xwayland window must be floating and exactly output-sized:
+The rootless Wine virtual desktop should be floating and output-sized. The rootful Xwayland fallback should also be floating when that fallback is used:
 
 ```kdl
+window-rule {
+    match app-id=r#"(?i)^(explorer\.exe|ableton live 12 suite\.exe)$"# title=r#"(?i)^(AbletonLive12|.*Ableton Live 12 Suite.*)$"#
+    open-floating true
+    draw-border-with-background false
+    geometry-corner-radius 0
+    clip-to-geometry false
+}
 window-rule {
     match app-id="org.freedesktop.Xwayland" title=r#"^Xwayland on :[0-9]+$"#
     open-floating true
@@ -145,15 +154,15 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --disable-gpu-compositing -
 
 A good launch had these properties:
 
-- niri reported `org.freedesktop.Xwayland`, floating, `window_size [2560,1440]`, `tile_pos [0,0]`.
-- Nested `xrandr` reported `XWAYLAND0 connected 2560x1440+0+0`.
-- Nested `xrandr` may still report about 60 Hz even when Xwayland is launched with `-fakescreenfps 165`.
+- niri reported the Wine virtual desktop floating at the output size.
+- `DISPLAY=:1 xrandr` reported the physical output as `2560x1440@164.90`.
+- The rootful Xwayland fallback may still report about 60 Hz even when launched with `-fakescreenfps 165`.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer.
 - CSMT is currently tested with `WINE_D3D_CONFIG=csmt=0x1`; use `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` to compare the older CSMT-off path.
 - Ableton `Options.txt` should contain `-DontCombineAPCs`.
-- `ps` should show realtime scheduling for the launched Wine/Xwayland processes when `chrt` is permitted.
+- `ps` should show realtime scheduling for the launched Wine processes when `chrt` is permitted.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.
