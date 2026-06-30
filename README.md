@@ -56,6 +56,12 @@ Then launch:
 live
 ```
 
+To apply the safe prefix fixes without launching Live, close Ableton and run:
+
+```bash
+live-preflight
+```
+
 The default graphics stack is `d2d-opengl`. It builds a patched Wine branch under `~/.local/opt/wine-d2d1-11.11` if it is not already present. If you want the older DXVK path instead:
 
 ```bash
@@ -65,6 +71,7 @@ The default graphics stack is `d2d-opengl`. It builds a patched Wine branch unde
 Fallback launchers:
 
 ```bash
+live-preflight
 live-rootful-xwayland
 live-wayland
 live-xwayland
@@ -91,10 +98,12 @@ curl -fsSL https://raw.githubusercontent.com/sashaduke/ableton-live12-linux/main
 The installer writes:
 
 - `~/.local/bin/live`
+- `~/.local/bin/live-preflight`
 - `~/.local/bin/live-rootful-xwayland`
 - `~/.local/bin/live-wayland`
 - `~/.local/bin/live-xwayland`
 - `~/.local/share/ableton-live12-linux/common.sh`
+- `~/.local/share/ableton-live12-linux/live-preflight`
 - `~/.local/share/ableton-live12-linux/live-rootful-xwayland`
 - `~/.local/share/ableton-live12-linux/live-wayland`
 - `~/.local/share/ableton-live12-linux/live-xwayland`
@@ -128,6 +137,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
+- For the default stack, sets `vblank_mode=0` to avoid waiting on rootful Xwayland's 60 Hz RandR mode list on high-refresh displays.
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
@@ -136,6 +146,10 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
 - Adds WebView2 browser flags to disable GPU/direct-composition paths that crash under Wine+DXVK.
 - Adds a niri rule for the rootful Xwayland window.
+
+The `live` launchers run the stopped-app-safe prefix checks before startup.
+`live-preflight` runs the same checks without launching Ableton and refuses to
+run while Live is open.
 
 ## niri Rule
 

@@ -54,6 +54,7 @@ Options:
 
 After install:
   live                    Rootful Xwayland launcher, recommended for niri
+  live-preflight          Apply safe stopped-app prefix fixes without launching Live
   live-rootful-xwayland   Same as the default when --backend rootful-xwayland is used
   live-wayland            Native Wine Wayland fallback
   live-xwayland           Rootless/Xwayland-satellite fallback
@@ -436,12 +437,58 @@ register_wineasio_if_available() {
   [[ -d "$prefix/drive_c" ]] || return 0
   ableton_running && return 0
 
+  if wineasio_registered; then
+    log "WineASIO already registered in the prefix"
+    return 0
+  fi
+
   log "Registering wineasio in the prefix"
   if [[ "$dry_run" -eq 1 ]]; then
     log "Would run: WINEPREFIX=$prefix wineasio-register"
   else
     env WINEPREFIX="$prefix" WINEARCH=win64 PATH="$(wine_path)" wineasio-register || warn "wineasio-register failed; continuing"
+    if ! wineasio_registered; then
+      register_wineasio64_with_unified_wine || warn "wineasio64 fallback registration failed; continuing"
+    fi
   fi
+}
+
+wineasio_registered() {
+  local wine_bin
+  wine_bin="$(wine_binary || true)"
+  [[ -n "$wine_bin" ]] || return 1
+
+  env WINEPREFIX="$prefix" WINEARCH=win64 WINEDEBUG=-all PATH="$(wine_path)" \
+    "$wine_bin" reg query 'HKLM\Software\ASIO\WineASIO' >/dev/null 2>&1
+}
+
+register_wineasio64_with_unified_wine() {
+  local wine_bin unix_dll windows_dll
+  wine_bin="$(wine_binary || true)"
+  [[ -n "$wine_bin" ]] || return 1
+  [[ -d "$prefix/drive_c/windows/syswow64" ]] || return 1
+
+  local candidates=(
+    /opt/wine-devel/lib64/wine/x86_64-unix/wineasio64.dll.so
+    /opt/wine-stable/lib64/wine/x86_64-unix/wineasio64.dll.so
+    /opt/wine-staging/lib64/wine/x86_64-unix/wineasio64.dll.so
+    /usr/lib/wine/x86_64-unix/wineasio64.dll.so
+    /usr/lib64/wine/x86_64-unix/wineasio64.dll.so
+    /usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wineasio64.dll.so
+  )
+
+  for unix_dll in "${candidates[@]}"; do
+    windows_dll="${unix_dll/x86_64-unix\/wineasio64.dll.so/x86_64-windows\/wineasio64.dll}"
+    [[ -f "$unix_dll" && -f "$windows_dll" ]] || continue
+
+    log "Registering wineasio64 with unified Wine regsvr32 fallback"
+    cp -f "$windows_dll" "$prefix/drive_c/windows/system32/"
+    env WINEPREFIX="$prefix" WINEARCH=win64 WINEDEBUG=-all PATH="$(wine_path)" \
+      "$wine_bin" regsvr32 "$unix_dll" >/dev/null
+    return 0
+  done
+
+  return 1
 }
 
 run_ableton_installer_if_needed() {
@@ -991,7 +1038,39 @@ export CLUTTER_BACKEND=x11
 run_ableton "$@"
 XWAYLAND
 
+  write_file_from_template "$support_dir/live-preflight" "ableton-live12-linux" <<'PREFLIGHT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
+
+if ableton_running; then
+  echo "Ableton is running; close it before running live-preflight." >&2
+  exit 1
+fi
+
+preflight_ableton
+
+cat <<EOF
+Ableton Live 12 preflight complete.
+
+Prefix:
+  $WINEPREFIX
+
+Checked:
+  - Ableton Options.txt graphics flags
+  - saved Ableton window geometry
+  - Serum 2 graphics preferences
+  - WebView2 Wine DLL overrides
+
+Note:
+  If Live still shows MME/DirectX in Audio preferences, set Driver Type to ASIO
+  and Audio Device to WineASIO Driver inside Live.
+EOF
+PREFLIGHT
+
   if [[ "$dry_run" -eq 0 ]]; then
+    ln -sfn "$support_dir/live-preflight" "$bin_dir/live-preflight"
     ln -sfn "$support_dir/live-rootful-xwayland" "$bin_dir/live-rootful-xwayland"
     ln -sfn "$support_dir/live-wayland" "$bin_dir/live-wayland"
     ln -sfn "$support_dir/live-xwayland" "$bin_dir/live-xwayland"
@@ -1001,7 +1080,7 @@ XWAYLAND
       xwayland) ln -sfn "$support_dir/live-xwayland" "$bin_dir/live" ;;
     esac
   else
-    log "Would link live, live-rootful-xwayland, live-wayland, and live-xwayland in $bin_dir"
+    log "Would link live, live-preflight, live-rootful-xwayland, live-wayland, and live-xwayland in $bin_dir"
   fi
 }
 
@@ -1154,6 +1233,7 @@ Installed Ableton Live 12 Linux launchers.
 
 Commands:
   live                    Default launcher ($default_backend)
+  live-preflight          Apply safe stopped-app prefix fixes without launching Live
   live-rootful-xwayland   Rootful Xwayland launcher, recommended under niri
   live-wayland            Native Wine Wayland fallback
   live-xwayland           Rootless/Xwayland-satellite fallback
