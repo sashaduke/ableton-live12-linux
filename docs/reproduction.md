@@ -74,9 +74,13 @@ DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x0' \
 
 The installer generalizes the display number, geometry, and refresh rate. On the tested Acer XB271HU, niri reported the physical output at `2560x1440@165`; rootful Xwayland still exposed 60 Hz RandR modes to X11/Windows applications even with `-fakescreenfps 165`. Custom `xrandr` 165 Hz modelines were not durable.
 
-For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer` and should not contain `-_ForceOpenGlBackend`. The Vulkan renderer asserted with this Wine path, and forcing Live's own OpenGL backend made Serum 2 editor redraw corruption spread into Ableton's host UI.
+For this stack, Ableton's `Options.txt` should not contain `-_ForceOpenGlBackend`. The Vulkan renderer asserted with this Wine path, and forcing Live's own OpenGL backend made Serum 2 editor redraw corruption spread into Ableton's host UI.
 
 The launcher should also set `WINE_D3D_CONFIG=csmt=0x0`. Without that, Ableton's host UI can leave tracers or wait for another click/key event before repainting.
+
+Current redraw-stability testing leaves Ableton's `-_Feature.UseGpuRenderer`
+flag disabled by default. To test Live's GPU UI path explicitly, launch with
+`ABLETON_LIVE_GPU_RENDERER=1 live`.
 
 WineASIO can be registered and visible while Ableton still chooses `MME/DirectX`.
 When that happens, Ableton logs high buffers such as `8192/4096` samples and
@@ -140,7 +144,7 @@ A good launch had these properties:
 - Nested `xrandr` may still report about 60 Hz even when Xwayland is launched with `-fakescreenfps 165`.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer; this is preferred for avoiding stale Ableton UI redraws under WineD3D/OpenGL.
+- Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer; current redraw-stability testing keeps that path opt-in.
 - Ableton's own UI repainted immediately after hotkeys with `WINE_D3D_CONFIG=csmt=0x0`.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.

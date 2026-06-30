@@ -27,7 +27,7 @@ This is the setup that was working cleanly on June 30, 2026:
 - WineD3D OpenGL renderer, not DXVK
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
 - `WINE_D3D_CONFIG=csmt=0x0`
-- Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
+- Ableton `Options.txt` does not contain `-_Feature.UseGpuRenderer` by default
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
 
@@ -138,7 +138,7 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
-- Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
+- Disables Ableton's GPU renderer flag in `Options.txt` by default. The GPU renderer can trigger constant stale redraws under WineD3D/OpenGL on this setup; set `ABLETON_LIVE_GPU_RENDERER=1` before launch if the CPU UI path regresses on your machine.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
@@ -207,7 +207,13 @@ Preferences.cfg.before-launch-geometry-autofix
 
 ## Stale Redraw Mitigations
 
-If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep Live's GPU renderer enabled and disable WineD3D's multithreaded command stream. The launcher now does both by default: it writes `-_Feature.UseGpuRenderer` and sets `WINE_D3D_CONFIG=csmt=0x0`.
+If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep WineD3D's multithreaded command stream disabled. The launcher sets `WINE_D3D_CONFIG=csmt=0x0` by default.
+
+The launcher now leaves Live's own GPU renderer disabled by default. To test it explicitly:
+
+```bash
+ABLETON_LIVE_GPU_RENDERER=1 live
+```
 
 Do not keep `-_ForceOpenGlBackend` in Ableton's `Options.txt`. It can reduce one class of Live repaint issue, but in testing it made Serum 2 editor redraw corruption spread into Ableton's host UI. The launcher removes that flag before startup.
 
@@ -223,10 +229,10 @@ For Serum 2.1.4, keep the default `d2d-opengl` Serum prefs:
 
 Changing Serum to full redraw (`"Disable Partial Redraw": true`) froze or badly stalled the editor in testing. Disabling Serum DirectComposition while keeping partial redraw enabled still produced host redraw corruption.
 
-If Live's GPU renderer regresses on your machine:
+If the non-GPU Live UI path regresses on your machine:
 
 ```bash
-ABLETON_LIVE_GPU_RENDERER=0 live
+ABLETON_LIVE_GPU_RENDERER=1 live
 ```
 
 If you prefer WineD3D's default multithreaded command stream for performance testing:
@@ -292,9 +298,9 @@ Verified on June 30, 2026:
 Observed checks:
 
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
-- Ableton log reported clean startup with the patched WineD3D/OpenGL stack. If the host UI leaves stale redraw regions, enable `-_Feature.UseGpuRenderer` in `Options.txt`; this repo now does that by default.
+- Ableton log reported clean startup with the patched WineD3D/OpenGL stack.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
-- Ableton `Options.txt` contained `-_Feature.UseGpuRenderer` and did not contain `-_ForceOpenGlBackend`.
+- Ableton `Options.txt` did not contain `-_ForceOpenGlBackend`. Current redraw-stability testing leaves `-_Feature.UseGpuRenderer` disabled by default.
 - niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.
 - Serum 2 no longer showed the blue/blank UI seen under DXVK, and did not leave black stale rectangles across Ableton once `-_ForceOpenGlBackend` was removed.
