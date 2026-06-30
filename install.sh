@@ -599,9 +599,8 @@ export WINEDEBUG
 
 if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
   export WINE_D3D_CONFIG="${WINE_D3D_CONFIG:-csmt=0x0}"
-  export LIVE_DISABLE_GL_VBLANK="${LIVE_DISABLE_GL_VBLANK:-1}"
-  if [[ "$LIVE_DISABLE_GL_VBLANK" != "0" && "$LIVE_DISABLE_GL_VBLANK" != "false" ]]; then
-    export vblank_mode="${vblank_mode:-0}"
+  if [[ -n "${LIVE_VBLANK_MODE:-}" ]]; then
+    export vblank_mode="$LIVE_VBLANK_MODE"
   fi
 fi
 

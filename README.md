@@ -27,7 +27,6 @@ This is the setup that was working cleanly on June 30, 2026:
 - WineD3D OpenGL renderer, not DXVK
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
 - `WINE_D3D_CONFIG=csmt=0x0`
-- `vblank_mode=0`
 - Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
@@ -137,7 +136,6 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
-- For the default stack, sets `vblank_mode=0` to avoid waiting on rootful Xwayland's 60 Hz RandR mode list on high-refresh displays.
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. This helps the Live host UI avoid stale WineD3D/OpenGL repaint regions; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if it regresses on your machine.
@@ -187,17 +185,18 @@ LIVE_REFRESH_RATE=165 live
 
 Rootful Xwayland may still expose 60 Hz RandR modes even when launched with
 `-fakescreenfps 165`. On the tested 165 Hz display, custom `xrandr` modelines
-could be applied briefly but were not durable, so the default OpenGL profile
-also disables Mesa's vblank wait:
+could be applied briefly but were not durable. If you want to test Mesa's
+vblank behavior explicitly:
 
 ```bash
-vblank_mode=0 live
+LIVE_VBLANK_MODE=0 live
 ```
 
-The launcher sets that by default for `d2d-opengl`. To opt out:
+That is not the default because it can worsen redraw behavior on some launches.
+To force normal Mesa behavior even if your shell has `vblank_mode` set:
 
 ```bash
-LIVE_DISABLE_GL_VBLANK=0 live
+env -u vblank_mode live
 ```
 
 The first time it patches a preferences file, it writes:
@@ -284,7 +283,6 @@ Verified on June 30, 2026:
 - niri 26.04
 - Xwayland rootful display at `2560x1440+0+0`
 - Xwayland launched with `-fakescreenfps 165` on the tested 165 Hz output
-- Mesa vblank waiting disabled with `vblank_mode=0` because rootful Xwayland still exposed 60 Hz RandR modes
 - AMD Radeon RX 7900 GRE with RADV
 - WineD3D OpenGL renderer for Ableton and Serum 2
 - WebView2 forced away from DXVK per app

@@ -66,13 +66,13 @@ WINEPREFIX="$HOME/myWinePrefixes/abletonLive12" \
   'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d opengl /f
 
 Xwayland :20 -ac -terminate -geometry 2560x1440 -fakescreenfps 165 -br -decorate
-DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x0' vblank_mode=0 \
+DISPLAY=:20 WINE_D3D_CONFIG='csmt=0x0' \
   WINEDLLOVERRIDES='winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b' \
   "$HOME/.local/opt/wine-d2d1-11.11/bin/wine" explorer /desktop=AbletonLive12,2560x1440 \
   "C:\ProgramData\Ableton\Live 12 Suite\Program\Ableton Live 12 Suite.exe"
 ```
 
-The installer generalizes the display number, geometry, and refresh rate. On the tested Acer XB271HU, niri reported the physical output at `2560x1440@165`; rootful Xwayland still exposed 60 Hz RandR modes to X11/Windows applications even with `-fakescreenfps 165`. Custom `xrandr` 165 Hz modelines were not durable, so the launcher also sets `vblank_mode=0` for the WineD3D/OpenGL stack.
+The installer generalizes the display number, geometry, and refresh rate. On the tested Acer XB271HU, niri reported the physical output at `2560x1440@165`; rootful Xwayland still exposed 60 Hz RandR modes to X11/Windows applications even with `-fakescreenfps 165`. Custom `xrandr` 165 Hz modelines were not durable.
 
 For this stack, Ableton's `Options.txt` should contain `-_Feature.UseGpuRenderer` and should not contain `-_ForceOpenGlBackend`. The Vulkan renderer asserted with this Wine path, and forcing Live's own OpenGL backend made Serum 2 editor redraw corruption spread into Ableton's host UI.
 
@@ -137,7 +137,7 @@ A good launch had these properties:
 
 - niri reported `org.freedesktop.Xwayland`, floating, `window_size [2560,1440]`, `tile_pos [0,0]`.
 - Nested `xrandr` reported `XWAYLAND0 connected 2560x1440+0+0`.
-- Nested `xrandr` may still report about 60 Hz; the launcher mitigates this with `vblank_mode=0`.
+- Nested `xrandr` may still report about 60 Hz even when Xwayland is launched with `-fakescreenfps 165`.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer; this is preferred for avoiding stale Ableton UI redraws under WineD3D/OpenGL.
