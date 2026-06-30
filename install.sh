@@ -1066,7 +1066,12 @@ set -euo pipefail
 
 source "${ABLETON_LIVE12_SUPPORT_DIR:-__SUPPORT_DIR__}/common.sh"
 
-export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-winemenubuilder.exe=d;winewayland.drv=d}"
+if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
+  default_overrides="winemenubuilder.exe=d;winewayland.drv=d;d3d11,dxgi,d3d10core,d2d1,dcomp,dwrite,d3d9,d3d8=b"
+else
+  default_overrides="winemenubuilder.exe=d;winewayland.drv=d"
+fi
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-$default_overrides}"
 
 unset WAYLAND_DISPLAY
 export DISPLAY="${LIVE_XWAYLAND_DISPLAY:-:1}"
@@ -1173,7 +1178,7 @@ begin = "// BEGIN ableton-live12-linux"
 end = "// END ableton-live12-linux"
 block = """// BEGIN ableton-live12-linux
 window-rule {
-    match app-id=r#"(?i)^(explorer\\.exe|ableton live 12 suite\\.exe)$"# title=r#"(?i)^(AbletonLive12|.*Ableton Live 12 Suite.*)$"#
+    match app-id=r#"(?i)^(explorer\\.exe|ableton live 12 suite\\.exe)$"# title=r#"(?i)^(AbletonLive12.*|.*Ableton Live 12 Suite.*)$"#
     open-floating true
     draw-border-with-background false
     geometry-corner-radius 0
