@@ -26,8 +26,8 @@ This is the setup that was working cleanly on June 30, 2026:
 - patched Wine 11.11 from `d2d1-dcomp-11.11`
 - WineD3D OpenGL renderer, not DXVK
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
-- `WINE_D3D_CONFIG=csmt=0x0`
-- Ableton `Options.txt` does not contain `-_Feature.UseGpuRenderer` by default
+- `WINE_D3D_CONFIG=csmt=0x1`
+- Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
 
@@ -135,13 +135,14 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Creates a `win64` Wine prefix when needed.
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
-- For the default stack, sets `WINE_D3D_CONFIG=csmt=0x0` to avoid stale Ableton host UI redraws/tracers.
+- For the default stack, sets `WINE_D3D_CONFIG=csmt=0x1` as the current redraw-stability test. Override with `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` if CSMT brings back stale regions.
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
-- Disables Ableton's GPU renderer flag in `Options.txt` by default. The GPU renderer can trigger constant stale redraws under WineD3D/OpenGL on this setup; set `ABLETON_LIVE_GPU_RENDERER=1` before launch if the CPU UI path regresses on your machine.
+- Enables Ableton's GPU renderer flag in `Options.txt` by default. Disabling it made the constant redraw issue worse in testing; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if you need to retest the CPU UI path.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
+- Sets default Windows theme registry values that Ableton probes during UI startup.
 - Adds WebView2 browser flags to disable GPU/direct-composition paths that crash under Wine+DXVK.
 - Adds a niri rule for the rootful Xwayland window.
 
@@ -207,12 +208,16 @@ Preferences.cfg.before-launch-geometry-autofix
 
 ## Stale Redraw Mitigations
 
-If Ableton's own UI leaves tracers or does not repaint until the next click/key event, keep WineD3D's multithreaded command stream disabled. The launcher sets `WINE_D3D_CONFIG=csmt=0x0` by default.
-
-The launcher now leaves Live's own GPU renderer disabled by default. To test it explicitly:
+If Ableton's own UI leaves tracers or does not repaint until the next click/key event, test both WineD3D command-stream modes. The launcher currently defaults to CSMT on:
 
 ```bash
-ABLETON_LIVE_GPU_RENDERER=1 live
+live
+```
+
+To force the older CSMT-off path:
+
+```bash
+LIVE_WINE_D3D_CONFIG=csmt=0x0 live
 ```
 
 Do not keep `-_ForceOpenGlBackend` in Ableton's `Options.txt`. It can reduce one class of Live repaint issue, but in testing it made Serum 2 editor redraw corruption spread into Ableton's host UI. The launcher removes that flag before startup.
@@ -229,19 +234,20 @@ For Serum 2.1.4, keep the default `d2d-opengl` Serum prefs:
 
 Changing Serum to full redraw (`"Disable Partial Redraw": true`) froze or badly stalled the editor in testing. Disabling Serum DirectComposition while keeping partial redraw enabled still produced host redraw corruption.
 
-If the non-GPU Live UI path regresses on your machine:
+If Live's GPU renderer regresses on your machine:
 
 ```bash
-ABLETON_LIVE_GPU_RENDERER=1 live
+ABLETON_LIVE_GPU_RENDERER=0 live
 ```
 
-If you prefer WineD3D's default multithreaded command stream for performance testing:
+If you prefer to spell WineD3D's command-stream setting directly:
 
 ```bash
-WINE_D3D_CONFIG=csmt=0x1 live
+WINE_D3D_CONFIG=csmt=0x0 live
 ```
 
-That may improve performance, but can bring back async repaint artifacts on Ableton's host UI.
+That returns to the older CSMT-off path. It may reduce async repaint artifacts,
+but it can cost throughput.
 
 ## WineASIO
 
@@ -300,7 +306,7 @@ Observed checks:
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log reported clean startup with the patched WineD3D/OpenGL stack.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
-- Ableton `Options.txt` did not contain `-_ForceOpenGlBackend`. Current redraw-stability testing leaves `-_Feature.UseGpuRenderer` disabled by default.
+- Ableton `Options.txt` contained `-_Feature.UseGpuRenderer` and did not contain `-_ForceOpenGlBackend`.
 - niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.
 - Serum 2 no longer showed the blue/blank UI seen under DXVK, and did not leave black stale rectangles across Ableton once `-_ForceOpenGlBackend` was removed.

@@ -582,7 +582,7 @@ set -euo pipefail
 : "${ABLETON_WINEPREFIX:=__ABLETON_WINEPREFIX__}"
 : "${ABLETON_WINE_ROOT:=__ABLETON_WINE_ROOT__}"
 : "${ABLETON_GRAPHICS_STACK:=__ABLETON_GRAPHICS_STACK__}"
-: "${ABLETON_LIVE_GPU_RENDERER:=0}"
+: "${ABLETON_LIVE_GPU_RENDERER:=1}"
 : "${LIVE_WINDOW_WIDTH:=__LIVE_WINDOW_WIDTH__}"
 : "${LIVE_WINDOW_HEIGHT:=__LIVE_WINDOW_HEIGHT__}"
 : "${LIVE_REFRESH_RATE:=__LIVE_REFRESH_RATE__}"
@@ -598,7 +598,7 @@ export WINEARCH
 export WINEDEBUG
 
 if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
-  export WINE_D3D_CONFIG="${WINE_D3D_CONFIG:-csmt=0x0}"
+  export WINE_D3D_CONFIG="${WINE_D3D_CONFIG:-${LIVE_WINE_D3D_CONFIG:-csmt=0x1}}"
   if [[ -n "${LIVE_VBLANK_MODE:-}" ]]; then
     export vblank_mode="$LIVE_VBLANK_MODE"
   fi
@@ -810,6 +810,15 @@ ensure_webview2_builtin_overrides() {
   done
 }
 
+ensure_windows_theme_defaults() {
+  ableton_running && return 0
+
+  local key='HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+  WINEDEBUG=-all "$wine_cmd" reg add "$key" /v AppsUseLightTheme /t REG_DWORD /d 1 /f >/dev/null 2>&1 || true
+  WINEDEBUG=-all "$wine_cmd" reg add "$key" /v SystemUsesLightTheme /t REG_DWORD /d 1 /f >/dev/null 2>&1 || true
+  WINEDEBUG=-all "$wine_cmd" reg add "$key" /v EnableTransparency /t REG_DWORD /d 0 /f >/dev/null 2>&1 || true
+}
+
 find_ableton_exe() {
   if [[ -n "${ABLETON_EXE:-}" ]]; then
     printf '%s\n' "$ABLETON_EXE"
@@ -849,6 +858,7 @@ find_ableton_exe_windows() {
 
 preflight_ableton() {
   ensure_webview2_builtin_overrides
+  ensure_windows_theme_defaults
   patch_ableton_geometry
   configure_live_graphics_options
   configure_serum2_prefs
@@ -1061,6 +1071,7 @@ Checked:
   - saved Ableton window geometry
   - Serum 2 graphics preferences
   - WebView2 Wine DLL overrides
+  - Windows theme registry defaults
 
 Note:
   If Live still shows MME/DirectX in Audio preferences, set Driver Type to ASIO
