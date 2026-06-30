@@ -2,7 +2,7 @@
 
 One-command setup for running a licensed Ableton Live 12 install under Wine on Linux. This repo captures the setup that made Ableton Live 12.4.2 Suite usable on niri at the end of June 2026, including Serum 2.
 
-The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and the compositor's normal rootless Xwayland display at the real output refresh rate, with Ableton running in a Wine virtual desktop inside it. This avoids rootful Xwayland's fake 60 Hz RandR mode list while keeping Ableton menus inside the Wine desktop.
+The recommended path is patched Wine D2D/DComp, WineD3D's OpenGL renderer, and the compositor's normal rootless Xwayland display at the real output refresh rate, with Ableton running in a Wine virtual desktop inside it. The installer builds the patched Wine tree, applies this repo's Ableton redraw patchset, creates/configures the prefix, installs launchers, and sets the working defaults.
 
 - native Wine Wayland: right-click menus opened in place, but the pointer could not enter the popup reliably;
 - direct rootless Xwayland/xwayland-satellite: the main UI could work, but menus appeared as centered floating windows;
@@ -24,9 +24,11 @@ This is the setup that was working cleanly on June 30, 2026:
 - rootless Xwayland at the real output refresh, with a Wine virtual desktop
 - `2560x1440` output at scale `1`, tested at `165 Hz`
 - patched Wine 11.11 from `d2d1-dcomp-11.11`
+- this repo's `ableton-live12-20260630-redraw-fixes-v1` Wine patchset
 - WineD3D OpenGL renderer, not DXVK
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
 - `WINE_D3D_CONFIG=csmt=0x1`
+- `WINED3D_DCOMP_FORCE_FULL_REDRAW=1`
 - Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
 - Ableton `Options.txt` contains `-DontCombineAPCs`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
@@ -56,6 +58,10 @@ Then launch:
 ```bash
 live
 ```
+
+That is the intended UX. You should not need to manually create a Wine prefix,
+edit Ableton's `Options.txt`, install DXVK, patch Wine source, or write niri
+rules by hand. The extra commands below are recovery/testing hooks.
 
 To apply the safe prefix fixes without launching Live, close Ableton and run:
 
@@ -134,10 +140,12 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 ## What The Script Configures
 
 - Builds giang17's `d2d1-dcomp-11.11` Wine branch when using the default `d2d-opengl` graphics stack.
+- Applies this repo's Wine patchset automatically. The patchset provides DXGI/DComp frame timing, D3D11 color-space support for Ableton's sRGB request, a WineD3D Vulkan assertion fallback, and the root-window full-redraw path that fixed Ableton host UI tracers.
 - Creates a `win64` Wine prefix when needed.
 - Optionally runs a local licensed Ableton Live 12 installer.
 - For the default stack, sets WineD3D `renderer=opengl` and forces `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8` to Wine builtin DLLs.
 - For the default stack, sets `WINE_D3D_CONFIG=csmt=0x1` as the current redraw-stability test. Override with `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` if CSMT brings back stale regions.
+- For the default stack, sets `WINED3D_DCOMP_FORCE_FULL_REDRAW=1`. This makes the Ableton host window overwrite stale root pixels every present while still allowing plugin child visuals to use the DComp path.
 - Uses the compositor's normal Xwayland display by default because it exposes the tested monitor as `2560x1440@164.90`. The rootful Xwayland fallback still exposed only about 60 Hz to X11 clients even when launched with `-fakescreenfps 165`.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. Disabling it made the constant redraw issue worse in testing; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if you need to retest the CPU UI path.
@@ -278,6 +286,19 @@ WINE_D3D_CONFIG=csmt=0x0 live
 
 That returns to the older CSMT-off path. It may reduce async repaint artifacts,
 but it can cost throughput.
+
+The known-good patchset also forces full root-window redraws in WineD3D's DComp
+GDI present path. This is on by default:
+
+```bash
+live
+```
+
+To disable only that mitigation for a plugin compatibility test:
+
+```bash
+WINED3D_DCOMP_FORCE_FULL_REDRAW=0 live
+```
 
 Disable realtime scheduling:
 

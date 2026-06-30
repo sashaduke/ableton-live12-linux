@@ -79,9 +79,11 @@ For this stack, Ableton's `Options.txt` should not contain `-_ForceOpenGlBackend
 
 Current redraw-stability testing keeps Ableton's `-_Feature.UseGpuRenderer`
 flag enabled. Disabling Live's GPU renderer made the constant redraw issue
-worse. CSMT is the active test variable: the launcher currently defaults to
-`WINE_D3D_CONFIG=csmt=0x1`, and `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` forces
-the older CSMT-off path.
+worse. The final host UI tracer fix was not a CSMT toggle; it was a WineD3D
+DComp/GDI present-path patch that forces full root-window redraws before child
+visual compositing. The launcher sets `WINED3D_DCOMP_FORCE_FULL_REDRAW=1` by
+default. `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` remains available as a comparison
+hook, but the known-good default is `WINE_D3D_CONFIG=csmt=0x1`.
 
 Ableton's `-DontCombineAPCs` option is enabled because both Ableton's
 `Options.txt` documentation and Wine-NSPA's Ableton Live 11/12 notes identify it
@@ -174,3 +176,24 @@ A good launch had these properties:
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.
 - Serum 2 did not leave black stale rectangles across Ableton when `-_ForceOpenGlBackend` was absent.
+- Ableton's host UI no longer left stale trails after the WineD3D root-window full-redraw patch.
+
+## Wine Patchset
+
+The repo carries the required Wine changes in:
+
+```text
+patches/0001-ableton-live12-wine-d2d-dcomp-redraw-fixes.patch
+```
+
+`install.sh` applies this automatically when building the default patched Wine
+tree. The patchset:
+
+- fills DComp/DXGI frame timing calls instead of returning empty stubs;
+- returns the real display refresh where Wine would otherwise expose zero or a
+  fixed 60 Hz-ish path;
+- accepts D3D11 `SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)`;
+- avoids the tested WineD3D Vulkan map-upload assertion by falling back instead
+  of aborting;
+- forces Ableton's root host window to full-redraw in the DComp GDI present path,
+  fixing stale host UI trails.

@@ -13,6 +13,8 @@ patched_wine_repo="${ABLETON_PATCHED_WINE_REPO:-https://github.com/giang17/wine.
 patched_wine_branch="${ABLETON_PATCHED_WINE_BRANCH:-d2d1-dcomp-11.11}"
 patched_wine_source="${ABLETON_PATCHED_WINE_SOURCE:-$HOME/src/wine-d2d1}"
 patched_wine_root="${ABLETON_PATCHED_WINE_ROOT:-$HOME/.local/opt/wine-d2d1-11.11}"
+repo_raw_url="${ABLETON_LIVE12_REPO_RAW_URL:-https://raw.githubusercontent.com/sashaduke/ableton-live12-linux/main}"
+wine_patchset_id="ableton-live12-20260630-redraw-fixes-v1"
 build_patched_wine=1
 install_arch_deps=0
 create_prefix=1
@@ -353,7 +355,8 @@ install_patched_wine_if_requested() {
     return 0
   }
 
-  if [[ -x "$patched_wine_root/bin/wine" ]]; then
+  if [[ -x "$patched_wine_root/bin/wine" ]] &&
+    [[ "$(cat "$patched_wine_root/.ableton-live12-linux-patchset" 2>/dev/null || true)" == "$wine_patchset_id" ]]; then
     log "Patched Wine already exists at $patched_wine_root"
     return 0
   fi
@@ -373,6 +376,7 @@ install_patched_wine_if_requested() {
 
   if [[ "$dry_run" -eq 1 ]]; then
     log "Would clone/update $patched_wine_repo branch $patched_wine_branch"
+    log "Would apply Ableton Live 12 Wine patchset $wine_patchset_id"
     log "Would run: ./configure --prefix=$patched_wine_root --enable-win64"
     log "Would run: make -j$(nproc 2>/dev/null || printf 4)"
     log "Would run: make install"
@@ -381,12 +385,19 @@ install_patched_wine_if_requested() {
 
   mkdir -p "$(dirname "$patched_wine_source")" "$(dirname "$patched_wine_root")"
   if [[ -d "$patched_wine_source/.git" ]]; then
-    git -C "$patched_wine_source" fetch origin "$patched_wine_branch"
-    git -C "$patched_wine_source" checkout "$patched_wine_branch"
-    git -C "$patched_wine_source" pull --ff-only origin "$patched_wine_branch"
+    if git -C "$patched_wine_source" diff --quiet &&
+      git -C "$patched_wine_source" diff --cached --quiet; then
+      git -C "$patched_wine_source" fetch origin "$patched_wine_branch"
+      git -C "$patched_wine_source" checkout "$patched_wine_branch"
+      git -C "$patched_wine_source" pull --ff-only origin "$patched_wine_branch"
+    else
+      warn "$patched_wine_source has local changes; reusing it without pulling"
+    fi
   else
     git clone --depth 1 --branch "$patched_wine_branch" "$patched_wine_repo" "$patched_wine_source"
   fi
+
+  apply_wine_patchset
 
   local jobs
   jobs="$(nproc 2>/dev/null || printf 4)"
@@ -396,6 +407,58 @@ install_patched_wine_if_requested() {
     make -j"$jobs"
     make install
   )
+
+  printf '%s\n' "$wine_patchset_id" >"$patched_wine_root/.ableton-live12-linux-patchset"
+}
+
+download_file() {
+  local url="$1"
+  local path="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$path"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$path" "$url"
+  else
+    die "curl or wget is required to fetch Wine patches for remote install"
+  fi
+}
+
+resolve_wine_patch() {
+  local rel="$1"
+  local script_dir local_path tmp_dir
+
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P || pwd)"
+  local_path="$script_dir/$rel"
+  if [[ -f "$local_path" ]]; then
+    printf '%s\n' "$local_path"
+    return 0
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  local_path="$tmp_dir/${rel##*/}"
+  log "Fetching Wine patch $rel"
+  download_file "$repo_raw_url/$rel" "$local_path"
+  printf '%s\n' "$local_path"
+}
+
+apply_wine_patchset() {
+  local patches=(
+    patches/0001-ableton-live12-wine-d2d-dcomp-redraw-fixes.patch
+  )
+  local rel patch
+
+  log "Applying Ableton Live 12 Wine patchset $wine_patchset_id"
+  for rel in "${patches[@]}"; do
+    patch="$(resolve_wine_patch "$rel")"
+    if git -C "$patched_wine_source" apply --check "$patch"; then
+      git -C "$patched_wine_source" apply "$patch"
+    elif git -C "$patched_wine_source" apply --reverse --check "$patch"; then
+      log "Wine patch already applied: ${rel##*/}"
+    else
+      die "Wine patch does not apply cleanly: $rel"
+    fi
+  done
 }
 
 create_wine_prefix_if_needed() {
@@ -601,6 +664,7 @@ export WINEDEBUG
 
 if [[ "$ABLETON_GRAPHICS_STACK" == "d2d-opengl" ]]; then
   export WINE_D3D_CONFIG="${WINE_D3D_CONFIG:-${LIVE_WINE_D3D_CONFIG:-csmt=0x1}}"
+  export WINED3D_DCOMP_FORCE_FULL_REDRAW="${WINED3D_DCOMP_FORCE_FULL_REDRAW:-1}"
   if [[ -n "${LIVE_VBLANK_MODE:-}" ]]; then
     export vblank_mode="$LIVE_VBLANK_MODE"
   fi
