@@ -82,6 +82,12 @@ worse. CSMT is the active test variable: the launcher currently defaults to
 `WINE_D3D_CONFIG=csmt=0x1`, and `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` forces
 the older CSMT-off path.
 
+Ableton's `-DontCombineAPCs` option is enabled because both Ableton's
+`Options.txt` documentation and Wine-NSPA's Ableton Live 11/12 notes identify it
+as relevant to Live's CPU/thread behavior under Wine. The launcher also uses
+`chrt -r` for Wine and rootful Xwayland when realtime scheduling is available,
+matching Wine-NSPA's recommendation to reduce lock contention.
+
 WineASIO can be registered and visible while Ableton still chooses `MME/DirectX`.
 When that happens, Ableton logs high buffers such as `8192/4096` samples and
 high total latency. Select `ASIO` plus `WineASIO Driver` in Live's audio
@@ -146,6 +152,8 @@ A good launch had these properties:
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log should report clean startup. If it logs `GPU Renderer: OnAlways`, the host UI is using Live's GPU renderer.
 - CSMT is currently tested with `WINE_D3D_CONFIG=csmt=0x1`; use `LIVE_WINE_D3D_CONFIG=csmt=0x0 live` to compare the older CSMT-off path.
+- Ableton `Options.txt` should contain `-DontCombineAPCs`.
+- `ps` should show realtime scheduling for the launched Wine/Xwayland processes when `chrt` is permitted.
 - Right-click on a clip slot opened the context menu at the clip slot.
 - Moving the pointer into that menu highlighted menu items.
 - Serum 2 opened with usable graphics instead of a blue/blank surface.

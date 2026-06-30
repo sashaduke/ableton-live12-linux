@@ -28,7 +28,9 @@ This is the setup that was working cleanly on June 30, 2026:
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
 - `WINE_D3D_CONFIG=csmt=0x1`
 - Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
+- Ableton `Options.txt` contains `-DontCombineAPCs`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
+- Xwayland and Wine launch through `chrt -r` when realtime scheduling is permitted
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
 
 The important negative result is `-_ForceOpenGlBackend`: it made one Ableton repaint issue look better, but caused Serum 2 editor redraw corruption to spread into Ableton's host UI. The launcher now removes that flag before startup.
@@ -139,6 +141,8 @@ ABLETON_WINEPREFIX="$HOME/.wine-ableton-live12" live
 - Detects the focused niri output refresh rate and passes it to rootful Xwayland with `-fakescreenfps`. This matters on high-refresh displays because Xwayland otherwise advertised a 60 Hz mode on the tested 165 Hz monitor.
 - For the DXVK fallback stack, installs DXVK with `winetricks -q dxvk` unless `--skip-dxvk` is used.
 - Enables Ableton's GPU renderer flag in `Options.txt` by default. Disabling it made the constant redraw issue worse in testing; set `ABLETON_LIVE_GPU_RENDERER=0` before launch if you need to retest the CPU UI path.
+- Adds Ableton's `-DontCombineAPCs` option. Wine-NSPA's Ableton Live notes report this reducing Live-specific CPU/thread overhead.
+- Starts rootful Xwayland and Wine through `chrt -r` when realtime scheduling is available. Set `LIVE_RT_PRIORITY=0` to disable this.
 - Sets Serum 2 prefs for the chosen stack. Default `d2d-opengl` enables Serum DirectComposition and partial redraw; DXVK disables both.
 - Patches Ableton's saved `Preferences.cfg` geometry at launch so the rendered buffer matches the current output.
 - Sets `msedgewebview2.exe` app-default DLL overrides for `d3d11`, `dxgi`, and `d2d1` to `builtin`.
@@ -208,6 +212,17 @@ Preferences.cfg.before-launch-geometry-autofix
 
 ## Stale Redraw Mitigations
 
+The highest-signal public notes for Ableton-on-Wine point at scheduling and
+thread contention, not ordinary GPU saturation. Wine-NSPA's
+[Ableton Live 11/12 notes](https://github.com/nine7nine/Wine-NSPA/issues/4)
+call out `-DontCombineAPCs`, realtime Wine patchwork, and `SCHED_RR` as
+Ableton-specific mitigations. Ableton's
+[Options.txt documentation](https://help.ableton.com/hc/en-us/articles/6003224107292-Options-txt-file)
+documents `-DontCombineAPCs`, and Ableton's
+[Live 12 release notes](https://www.ableton.com/en/release-notes/live-12/)
+say Live 12.2 added a Windows hardware-accelerated GPU renderer to improve UI
+performance, so this setup keeps Live's GPU renderer enabled.
+
 If Ableton's own UI leaves tracers or does not repaint until the next click/key event, test both WineD3D command-stream modes. The launcher currently defaults to CSMT on:
 
 ```bash
@@ -248,6 +263,12 @@ WINE_D3D_CONFIG=csmt=0x0 live
 
 That returns to the older CSMT-off path. It may reduce async repaint artifacts,
 but it can cost throughput.
+
+Disable realtime scheduling:
+
+```bash
+LIVE_RT_PRIORITY=0 live
+```
 
 ## WineASIO
 
@@ -306,7 +327,7 @@ Observed checks:
 - Ableton log reached `Default App: End InitApplication` and `Live App: End Init`.
 - Ableton log reported clean startup with the patched WineD3D/OpenGL stack.
 - Ableton log reported `Init: Screen at +0+0: 2560x1440, scale 1`.
-- Ableton `Options.txt` contained `-_Feature.UseGpuRenderer` and did not contain `-_ForceOpenGlBackend`.
+- Ableton `Options.txt` contained `-_Feature.UseGpuRenderer` and `-DontCombineAPCs`, and did not contain `-_ForceOpenGlBackend`.
 - niri reported the Xwayland window floating at the output size.
 - Right-click context menus opened at the clicked Ableton location, not centered, and hover into the popup worked.
 - Serum 2 no longer showed the blue/blank UI seen under DXVK, and did not leave black stale rectangles across Ableton once `-_ForceOpenGlBackend` was removed.

@@ -586,6 +586,8 @@ set -euo pipefail
 : "${LIVE_WINDOW_WIDTH:=__LIVE_WINDOW_WIDTH__}"
 : "${LIVE_WINDOW_HEIGHT:=__LIVE_WINDOW_HEIGHT__}"
 : "${LIVE_REFRESH_RATE:=__LIVE_REFRESH_RATE__}"
+: "${LIVE_RT_PRIORITY:=20}"
+: "${LIVE_XWAYLAND_RT_PRIORITY:=$LIVE_RT_PRIORITY}"
 : "${WINEARCH:=win64}"
 : "${WINEDEBUG:=-all}"
 
@@ -628,6 +630,32 @@ export WINEASIO_CONNECT_TO_HARDWARE="${WINEASIO_CONNECT_TO_HARDWARE:-on}"
 
 ableton_running() {
   pgrep -f '[A]bleton Live 12 .*\.exe' >/dev/null 2>&1
+}
+
+run_with_realtime() {
+  local priority="$1"
+  shift
+
+  if [[ "$priority" =~ ^[1-9][0-9]*$ ]] &&
+    command -v chrt >/dev/null 2>&1 &&
+    chrt -r "$priority" true >/dev/null 2>&1; then
+    chrt -r "$priority" "$@"
+  else
+    "$@"
+  fi
+}
+
+exec_with_realtime() {
+  local priority="$1"
+  shift
+
+  if [[ "$priority" =~ ^[1-9][0-9]*$ ]] &&
+    command -v chrt >/dev/null 2>&1 &&
+    chrt -r "$priority" true >/dev/null 2>&1; then
+    exec chrt -r "$priority" "$@"
+  fi
+
+  exec "$@"
 }
 
 detect_target_geometry() {
@@ -764,6 +792,8 @@ configure_live_graphics_options() {
     else
       grep -qxF -- '-_Feature.UseGpuRenderer' "$options" || printf '%s\n' '-_Feature.UseGpuRenderer' >>"$options"
     fi
+
+    grep -qxF -- '-DontCombineAPCs' "$options" || printf '%s\n' '-DontCombineAPCs' >>"$options"
   done
 }
 
@@ -881,10 +911,10 @@ EOF
   fi
 
   if command -v pw-jack >/dev/null 2>&1; then
-    exec pw-jack "$wine_cmd" "$exe" "$@"
+    exec_with_realtime "$LIVE_RT_PRIORITY" pw-jack "$wine_cmd" "$exe" "$@"
   fi
 
-  exec "$wine_cmd" "$exe" "$@"
+  exec_with_realtime "$LIVE_RT_PRIORITY" "$wine_cmd" "$exe" "$@"
 }
 COMMON
 
@@ -976,7 +1006,8 @@ log_dir="$HOME/.cache/ableton-live12/rootful-xwayland"
 mkdir -p "$log_dir"
 xwayland_log="$log_dir/xwayland-${display#:}.log"
 
-Xwayland "$display" -ac -terminate -geometry "${width}x${height}" -fakescreenfps "$refresh" -br -decorate >"$xwayland_log" 2>&1 &
+run_with_realtime "$LIVE_XWAYLAND_RT_PRIORITY" \
+  Xwayland "$display" -ac -terminate -geometry "${width}x${height}" -fakescreenfps "$refresh" -br -decorate >"$xwayland_log" 2>&1 &
 xwayland_pid=$!
 trap 'kill "$xwayland_pid" 2>/dev/null || true' EXIT
 
@@ -992,10 +1023,10 @@ export SDL_VIDEODRIVER=x11
 export CLUTTER_BACKEND=x11
 
 if command -v pw-jack >/dev/null 2>&1; then
-  exec pw-jack "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+  exec_with_realtime "$LIVE_RT_PRIORITY" pw-jack "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
 fi
 
-exec "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
+exec_with_realtime "$LIVE_RT_PRIORITY" "$wine_cmd" explorer "/desktop=AbletonLive12,${width}x${height}" "$exe_windows" "$@"
 ROOTFUL_XWAYLAND
 
   write_file_from_template "$support_dir/live-wayland" "ableton-live12-linux" <<'WAYLAND'
