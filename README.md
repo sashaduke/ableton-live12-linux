@@ -27,6 +27,7 @@ This is the setup that was working cleanly on June 30, 2026:
 - WineD3D OpenGL renderer, not DXVK
 - Wine builtin `d3d11`, `dxgi`, `d3d10core`, `d2d1`, `dcomp`, `dwrite`, `d3d9`, and `d3d8`
 - `WINE_D3D_CONFIG=csmt=0x0`
+- `vblank_mode=0`
 - Ableton `Options.txt` contains `-_Feature.UseGpuRenderer`
 - Ableton `Options.txt` does not contain `-_ForceOpenGlBackend`
 - Serum 2 prefs keep DirectComposition and partial redraw enabled
@@ -164,10 +165,25 @@ The launcher detects the focused niri output size and patches the saved Ableton 
 LIVE_WINDOW_WIDTH=1920 LIVE_WINDOW_HEIGHT=1080 live
 ```
 
-Override rootful Xwayland's advertised refresh rate:
+Override rootful Xwayland's fake-screen refresh rate:
 
 ```bash
 LIVE_REFRESH_RATE=165 live
+```
+
+Rootful Xwayland may still expose 60 Hz RandR modes even when launched with
+`-fakescreenfps 165`. On the tested 165 Hz display, custom `xrandr` modelines
+could be applied briefly but were not durable, so the default OpenGL profile
+also disables Mesa's vblank wait:
+
+```bash
+vblank_mode=0 live
+```
+
+The launcher sets that by default for `d2d-opengl`. To opt out:
+
+```bash
+LIVE_DISABLE_GL_VBLANK=0 live
 ```
 
 The first time it patches a preferences file, it writes:
@@ -208,6 +224,18 @@ WINE_D3D_CONFIG=csmt=0x1 live
 
 That may improve performance, but can bring back async repaint artifacts on Ableton's host UI.
 
+## WineASIO
+
+The installer registers WineASIO and the launcher runs through `pw-jack` when it
+is available, but Ableton can still keep using `MME/DirectX` in its own audio
+preferences. In that state Live may show very large buffers such as `8192/4096`
+samples and high reported latency even though WineASIO is installed.
+
+For best scheduling behavior, set Ableton's audio driver type to `ASIO` and the
+audio device to `WineASIO Driver` inside Live's audio preferences. The launcher
+does not binary-patch Ableton's `Preferences.cfg` for this because that file is
+not a stable text format.
+
 ## Options
 
 ```text
@@ -242,6 +270,7 @@ Verified on June 30, 2026:
 - niri 26.04
 - Xwayland rootful display at `2560x1440+0+0`
 - Xwayland launched with `-fakescreenfps 165` on the tested 165 Hz output
+- Mesa vblank waiting disabled with `vblank_mode=0` because rootful Xwayland still exposed 60 Hz RandR modes
 - AMD Radeon RX 7900 GRE with RADV
 - WineD3D OpenGL renderer for Ableton and Serum 2
 - WebView2 forced away from DXVK per app
