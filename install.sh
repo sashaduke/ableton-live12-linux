@@ -1178,7 +1178,14 @@ begin = "// BEGIN ableton-live12-linux"
 end = "// END ableton-live12-linux"
 block = """// BEGIN ableton-live12-linux
 window-rule {
-    match app-id=r#"(?i)^(explorer\\.exe|ableton live 12 suite\\.exe)$"# title=r#"(?i)^(AbletonLive12.*|.*Ableton Live 12 Suite.*)$"#
+    match app-id="explorer.exe" title=r#"^AbletonLive12.*Wine Desktop$"#
+    open-floating true
+    draw-border-with-background false
+    geometry-corner-radius 0
+    clip-to-geometry false
+}
+window-rule {
+    match app-id="ableton live 12 suite.exe" title=r#".*Ableton Live 12 Suite.*"#
     open-floating true
     draw-border-with-background false
     geometry-corner-radius 0
